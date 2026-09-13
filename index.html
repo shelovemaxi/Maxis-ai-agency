@@ -1,0 +1,96 @@
+<!doctype html>
+<html data-theme="alfred-light">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5" type="text/css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5/colors/properties-extended.css" type="text/css" />
+    <style>/* Instant-app theme. Values mirror the canonical brand tokens in
+   app/webclient/src/index.css (Tasklet Brand Book). This is a standalone bundle
+   that cannot import those tokens, so the hexes are duplicated here — keep them
+   in sync with the alfred-light / alfred-dark theme blocks in index.css. */
+[data-theme='alfred-light'] {
+  color-scheme: light;
+  --radius-selector: 0rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+  --color-base-100: #f5f5f5;
+  --color-base-200: #eaeaea;
+  --color-base-300: #dfdfdf;
+  --color-base-content: #121215;
+  --color-primary: #4e814e;
+  --color-primary-content: #f5f5f5;
+  --color-secondary: #676caa;
+  --color-secondary-content: #121215;
+  --color-accent: #676caa;
+  --color-accent-content: #121215;
+  --color-neutral: #09342a;
+  --color-neutral-content: #f5f5f5;
+  --color-info: #676caa;
+  --color-info-content: #121215;
+  --color-success: #4e814e;
+  --color-success-content: #f5f5f5;
+  --color-warning: #b8860b;
+  --color-warning-content: #121215;
+  --color-coral: #ff7542;
+  --color-coral-80: #803b21;
+  --color-error: #9e3d32;
+  --color-error-content: #f5f5f5;
+}
+[data-theme='alfred-dark'] {
+  color-scheme: dark;
+  --radius-selector: 0rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.25rem;
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+  --border: 1px;
+  --depth: 1;
+  --noise: 0;
+  --color-base-100: #121215;
+  --color-base-200: #1a1a1e;
+  --color-base-300: #252529;
+  --color-base-content: #f5f5f5;
+  --color-primary: #4e814e;
+  --color-primary-content: #f5f5f5;
+  --color-secondary: #9aa2ff;
+  --color-secondary-content: #121215;
+  --color-accent: #9aa2ff;
+  --color-accent-content: #121215;
+  --color-neutral: #3a3a42;
+  --color-neutral-content: #b8b8c0;
+  --color-info: #9aa2ff;
+  --color-info-content: #121215;
+  --color-success: #4e814e;
+  --color-success-content: #f5f5f5;
+  --color-warning: #b8860b;
+  --color-warning-content: #121215;
+  --color-coral: #ff7542;
+  --color-coral-80: #803b21;
+  --color-error: #9e3d32;
+  --color-error-content: #f5f5f5;
+}
+</style>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <script>
+      (function() {
+        var theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'alfred-dark' : 'alfred-light';
+        document.documentElement.setAttribute('data-theme', theme);
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(e) {
+          document.documentElement.setAttribute('data-theme', e.matches ? 'alfred-dark' : 'alfred-light');
+        });
+      })();
+    </script>
+  </head>
+  <body class="bg-base-100 text-base-content">
+    <div id="root"></div>
+    <script src="bundle.js"></script>
+  </body>
+</html>
