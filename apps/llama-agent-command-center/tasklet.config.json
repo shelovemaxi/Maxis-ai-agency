@@ -1,0 +1,6 @@
+{
+  "name": "llama-agent-command-center",
+  "displayName": "Llama Agent Command Center",
+  "description": "A multi-agent workspace with individual chats, group orchestration, research notes, tasks, and connector controls.",
+  "instantAppType": "tsx"
+}

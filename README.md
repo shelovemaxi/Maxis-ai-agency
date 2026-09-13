@@ -1,1 +1,1 @@
-# Maxis-ai-agency
+# Maxis AI Agency\n\nNexus Agent Command Center: three agent chats, Agent Council group chat, alerts, shared memory, supervision controls, connector hub, and responsive mobile UI.\n\nThe dashboard is an Instant App source under `apps/llama-agent-command-center`. It uses the Llama connection through the host bridge; credentials are never stored in this repository.\n\n## Deployment\n\nThe current Cloudflare connection is Browser Rendering only. Add a Cloudflare Pages or Workers connection/token to deploy this static app publicly.
