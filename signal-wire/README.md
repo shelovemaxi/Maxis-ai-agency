@@ -49,6 +49,17 @@ Feeds and queries are configured near the top of `app.py`. Requests use a timeou
 
 The cache is written atomically to `data/cache.json`; if a refresh fails, the last successful data remains available. Automatic refresh is limited to every 15 minutes, while the dashboard polls status periodically. Threshold and filter preferences are stored only in browser localStorage.
 
+## Talk to Signal Wire AI
+
+The dashboard includes an AI analyst panel. GitHub Pages cannot keep a Gemini key private, so the repository includes a small Cloudflare Worker in `worker/` that acts as the secure backend.
+
+1. Install Wrangler or use the Cloudflare dashboard's Workers editor.
+2. Create a Worker from `worker/index.js` and set the variable/secret `GEMINI_API_KEY` to your Gemini key. Never commit the key.
+3. Deploy the Worker and copy its `https://...workers.dev` URL.
+4. Open Signal Wire, expand **AI connection settings**, paste the URL, and save it.
+
+The browser sends the current filtered events with each question. The Worker instructs Gemini to use only that evidence, disclose uncertainty, respect the two-domain verification rule, and avoid personalized financial advice. The key never reaches GitHub Pages or the browser.
+
 ## Limitations, privacy, and safety
 Feeds can be delayed, blocked, malformed, rate-limited, or unavailable. Some publishers change RSS URLs or restrict access. GDELT results are broad and may include noisy reporting. Scores are rule-based prioritization, not predictions, fact verification, or investment advice. Always open the original source and independently verify important information. No credentials or user data are collected; this is intended for local use. Do not make trading decisions solely from this dashboard.
 
