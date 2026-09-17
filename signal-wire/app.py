@@ -17,12 +17,17 @@ SOURCES=[('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_
 GDELT=[('GDELT geopolitics','Geopolitics','geopolitics OR conflict OR war'),('GDELT trade','Geopolitics','tariff OR sanctions OR trade restriction'),('GDELT supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
 WORLD_MONITOR_API='https://api.worldmonitor.app/api'
 def worldmonitor_items():
- out=[]; health={}; errors=[]
+ out=[]; health={}; errors=[]; key=os.getenv('WORLDMONITOR_API_KEY','').strip()
+ if not key:
+  return out,{'World Monitor':{'ok':False,'count':0,'url':'https://www.worldmonitor.app','error':'Public API currently requires an API key'}},[]
+ def wm_json(path):
+  req=Request(WORLD_MONITOR_API+path,headers={'User-Agent':'SignalWire/2.0','X-API-Key':key,'Authorization':'Bearer '+key})
+  with urlopen(req,timeout=TIMEOUT) as r:return json.loads(r.read().decode('utf8'))
  try:
-  raw=json.loads(fetch(WORLD_MONITOR_API+'/economic/v1/get-macro-signals').decode('utf8')); signals=raw.get('signals',{}); regime=signals.get('macroRegime',{}); flow=signals.get('flowStructure',{}); title='World Monitor macro regime: '+str(regime.get('status','updated')).replace('_',' '); summary='World Monitor reports macro regime '+str(regime.get('status','updated'))+'. QQQ 20-day ROC: '+str(regime.get('qqqRoc20','n/a'))+'; XLP 20-day ROC: '+str(regime.get('xlpRoc20','n/a'))+'.'; out.append(item(title,summary,WORLD_MONITOR_API+'/economic/v1/get-macro-signals',raw.get('timestamp',now()),'World Monitor','Macro'));health['World Monitor macro']={'ok':True,'count':1,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals'}
+  raw=wm_json('/economic/v1/get-macro-signals'); signals=raw.get('signals',{}); regime=signals.get('macroRegime',{}); flow=signals.get('flowStructure',{}); title='World Monitor macro regime: '+str(regime.get('status','updated')).replace('_',' '); summary='World Monitor reports macro regime '+str(regime.get('status','updated'))+'. QQQ 20-day ROC: '+str(regime.get('qqqRoc20','n/a'))+'; XLP 20-day ROC: '+str(regime.get('xlpRoc20','n/a'))+'.'; out.append(item(title,summary,WORLD_MONITOR_API+'/economic/v1/get-macro-signals',raw.get('timestamp',now()),'World Monitor','Macro'));health['World Monitor macro']={'ok':True,'count':1,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals'}
  except Exception as e: health['World Monitor macro']={'ok':False,'count':0,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals','error':str(e)[:160]};errors.append('World Monitor macro: '+str(e)[:120])
  try:
-  raw=json.loads(fetch(WORLD_MONITOR_API+'/economic/v1/get-energy-prices').decode('utf8'))
+  raw=wm_json('/economic/v1/get-energy-prices')
   prices=raw.get('prices',[])
   for p in prices:
    change=float(p.get('change',0) or 0)
