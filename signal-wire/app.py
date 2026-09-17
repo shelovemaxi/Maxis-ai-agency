@@ -17,27 +17,63 @@ SOURCES=[('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_
 GDELT=[('GDELT geopolitics','Geopolitics','geopolitics OR conflict OR war'),('GDELT trade','Geopolitics','tariff OR sanctions OR trade restriction'),('GDELT supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
 WORLD_MONITOR_API='https://api.worldmonitor.app/api'
 def worldmonitor_items():
- out=[]; health={}; errors=[]; key=os.getenv('WORLDMONITOR_API_KEY','').strip()
+ """Fetch optional World Monitor signals without making refresh fragile.
+
+ World Monitor's hosted API requires a key and documents X-WorldMonitor-Key.
+ A bad key, rate limit, outage, or response-shape change is recorded as source
+ health and never aborts the other collectors.
+ """
+ out=[]; health={}; errors=[]
+ key=os.getenv('WORLDMONITOR_API_KEY','').strip()
+ base=os.getenv('WORLDMONITOR_API_BASE', WORLD_MONITOR_API).rstrip('/')
  if not key:
-  return out,{'World Monitor':{'ok':False,'count':0,'url':'https://www.worldmonitor.app','error':'Public API currently requires an API key'}},[]
+  return out,{'World Monitor':{'ok':False,'count':0,'url':'https://www.worldmonitor.app/docs/api-reference','error':'API key not configured; skipped safely'}},[]
  def wm_json(path):
-  req=Request(WORLD_MONITOR_API+path,headers={'User-Agent':'SignalWire/2.0','X-API-Key':key,'Authorization':'Bearer '+key})
-  with urlopen(req,timeout=TIMEOUT) as r:return json.loads(r.read().decode('utf8'))
+  last=None
+  for attempt in range(3):
+   try:
+    req=Request(base+path,headers={'User-Agent':'SignalWire/2.1','Accept':'application/json','X-WorldMonitor-Key':key})
+    with urlopen(req,timeout=TIMEOUT) as r:
+     if getattr(r,'status',200) != 200: raise RuntimeError('HTTP '+str(r.status))
+     value=json.loads(r.read().decode('utf8'))
+     if not isinstance(value,dict): raise ValueError('response was not an object')
+     return value
+   except Exception as exc:
+    last=exc
+    if attempt < 2: time.sleep(0.6*(attempt+1))
+  raise last or RuntimeError('request failed')
+ def record_failure(label,path,exc):
+  message=str(exc)[:160]
+  health[label]={'ok':False,'count':0,'url':base+path,'error':message}
+  errors.append(label+': '+message[:120])
  try:
-  raw=wm_json('/economic/v1/get-macro-signals'); signals=raw.get('signals',{}); regime=signals.get('macroRegime',{}); flow=signals.get('flowStructure',{}); title='World Monitor macro regime: '+str(regime.get('status','updated')).replace('_',' '); summary='World Monitor reports macro regime '+str(regime.get('status','updated'))+'. QQQ 20-day ROC: '+str(regime.get('qqqRoc20','n/a'))+'; XLP 20-day ROC: '+str(regime.get('xlpRoc20','n/a'))+'.'; out.append(item(title,summary,WORLD_MONITOR_API+'/economic/v1/get-macro-signals',raw.get('timestamp',now()),'World Monitor','Macro'));health['World Monitor macro']={'ok':True,'count':1,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals'}
- except Exception as e: health['World Monitor macro']={'ok':False,'count':0,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals','error':str(e)[:160]};errors.append('World Monitor macro: '+str(e)[:120])
+  path='/economic/v1/get-macro-signals'; raw=wm_json(path)
+  signals=raw.get('signals') if isinstance(raw.get('signals'),dict) else raw
+  regime=signals.get('macroRegime') if isinstance(signals.get('macroRegime'),dict) else {}
+  status=str(regime.get('status') or 'updated').replace('_',' ')
+  title='World Monitor macro regime: '+status
+  summary='World Monitor reports macro regime '+status+'. QQQ 20-day ROC: '+str(regime.get('qqqRoc20','n/a'))+'; XLP 20-day ROC: '+str(regime.get('xlpRoc20','n/a'))+'.'
+  out.append(item(title,summary,base+path,raw.get('timestamp',now()),'World Monitor','Macro'))
+  health['World Monitor macro']={'ok':True,'count':1,'url':base+path}
+ except Exception as exc: record_failure('World Monitor macro','/economic/v1/get-macro-signals',exc)
  try:
-  raw=wm_json('/economic/v1/get-energy-prices')
+  path='/economic/v1/get-energy-prices'; raw=wm_json(path)
   prices=raw.get('prices',[])
-  for p in prices:
-   change=float(p.get('change',0) or 0)
-   if abs(change)>=1:
-    title='World Monitor energy price move: '+str(p.get('name') or p.get('commodity','energy'))
-    summary=f"World Monitor reports {p.get('commodity','energy')} at {p.get('price','n/a')} {p.get('unit','')} with change {change:+g}."
-    out.append(item(title,summary,WORLD_MONITOR_API+'/economic/v1/get-energy-prices',now(),'World Monitor','Commodities'))
-  health['World Monitor energy']={'ok':True,'count':len(prices),'url':WORLD_MONITOR_API+'/economic/v1/get-energy-prices'}
- except Exception as e: health['World Monitor energy']={'ok':False,'count':0,'url':WORLD_MONITOR_API+'/economic/v1/get-energy-prices','error':str(e)[:160]};errors.append('World Monitor energy: '+str(e)[:120])
+  if not isinstance(prices,list): prices=[]
+  accepted=0
+  for price in prices:
+   if not isinstance(price,dict): continue
+   try: change=float(price.get('change',0) or 0)
+   except (TypeError,ValueError): continue
+   if abs(change) >= 1:
+    commodity=str(price.get('commodity') or price.get('name') or 'energy')
+    title='World Monitor energy price move: '+commodity
+    summary='World Monitor reports '+commodity+' at '+str(price.get('price','n/a'))+' '+str(price.get('unit',''))+' with change '+f'{change:+g}'+'.'
+    out.append(item(title,summary,base+path,raw.get('timestamp',now()),'World Monitor','Commodities')); accepted += 1
+  health['World Monitor energy']={'ok':True,'count':accepted,'url':base+path}
+ except Exception as exc: record_failure('World Monitor energy','/economic/v1/get-energy-prices',exc)
  return out,health,errors
+
 state={'items':[],'last_refresh':None,'source_health':{},'errors':[],'refreshing':False}; lock=threading.Lock()
 def now():return datetime.now(timezone.utc).isoformat()
 def clean(s):return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',s or ''))).strip()
