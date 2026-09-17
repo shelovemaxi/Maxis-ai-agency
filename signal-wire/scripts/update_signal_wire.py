@@ -1,15 +1,39 @@
 #!/usr/bin/env python3
-"""Fetch Signal Wire data and publish a static JSON snapshot for GitHub Pages."""
+"""Fetch Signal Wire data and publish snapshots used by GitHub Pages builds."""
 import json, os, sys
 from datetime import datetime, timezone
-ROOT=os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DOCS=os.path.join(ROOT,"docs")
-sys.path.insert(0,ROOT)
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+APP_ROOT = os.path.join(ROOT, "signal-wire")
+sys.path.insert(0, APP_ROOT)
 import app
+
 items, health, errors = app.fetch_all()
-payload={"items":items,"last_refresh":datetime.now(timezone.utc).isoformat(),"source_health":health,"errors":errors}
-os.makedirs(DOCS,exist_ok=True)
-tmp=os.path.join(DOCS,"data.json.tmp")
-with open(tmp,"w",encoding="utf-8") as f: json.dump(payload,f,ensure_ascii=False)
-os.replace(tmp,os.path.join(DOCS,"data.json"))
-print(json.dumps({"items":len(items),"healthy_sources":sum(1 for x in health.values() if x.get("ok")),"errors":len(errors)}))
+payload = {
+    "items": items,
+    "last_refresh": datetime.now(timezone.utc).isoformat(),
+    "source_health": health,
+    "errors": errors,
+}
+
+# Keep every published dashboard copy in sync. This avoids stale data when
+# Pages/custom-domain configuration points at a different directory.
+paths = [
+    os.path.join(ROOT, "data.json"),
+    os.path.join(ROOT, "docs", "data.json"),
+    os.path.join(APP_ROOT, "data.json"),
+    os.path.join(APP_ROOT, "docs", "data.json"),
+]
+for destination in paths:
+    os.makedirs(os.path.dirname(destination), exist_ok=True)
+    temporary = destination + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False)
+    os.replace(temporary, destination)
+
+print(json.dumps({
+    "items": len(items),
+    "healthy_sources": sum(1 for value in health.values() if value.get("ok")),
+    "errors": len(errors),
+    "updated": paths,
+}))
