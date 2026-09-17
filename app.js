@@ -23,7 +23,7 @@ $('#method').onclick=()=>{const hidden=$('#methodology').classList.toggle('hidde
 $('#refresh').onclick=async()=>{const b=$('#refresh');b.disabled=true;b.textContent='↻ Refreshing…';try{await load()}finally{b.disabled=false;b.textContent='↻ Reload data'}};load();setInterval(load,900000);
 const chatLog=$('#chatLog'),chatForm=$('#chatForm'),chatInput=$('#chatInput'),aiEndpoint=$('#aiEndpoint'),aiStatus=$('#aiStatus');
 const savedEndpoint=localStorage.getItem('sw-ai-endpoint')||'';
-const autoEndpoint=(!location.hostname.endsWith('github.io')&&!location.hostname.includes('github.com'))?location.origin:'';
+const autoEndpoint='https://signal-wire-ai.maxiwalker0707.workers.dev';
 aiEndpoint.value=savedEndpoint||autoEndpoint;
 if(savedEndpoint)aiStatus.textContent='Connected to your saved AI backend.';else if(autoEndpoint)aiStatus.textContent='Connected to this Cloudflare Worker. Your Gemini key stays server-side.';else aiStatus.textContent='Add the private Worker URL below to enable AI chat.';
 function addMsg(role,text){const el=document.createElement('div');el.className='chat-msg '+role;el.textContent=text;chatLog.appendChild(el);chatLog.scrollTop=chatLog.scrollHeight;return el}
