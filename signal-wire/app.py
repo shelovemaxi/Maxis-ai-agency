@@ -15,6 +15,24 @@ except ImportError: HAS_FLASK=False
 BASE=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(BASE,'data'); CACHE=os.path.join(DATA,'cache.json'); PORT=int(os.getenv('PORT','5050')); TIMEOUT=14; REFRESH_SECONDS=900
 SOURCES=[('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),('CNBC','Equities','https://www.cnbc.com/id/100003114/device/rss/rss.html'),('Yahoo Finance','Equities','https://finance.yahoo.com/news/rssindex'),('CoinDesk','Crypto','https://www.coindesk.com/arc/outboundfeeds/rss/'),('Cointelegraph','Crypto','https://cointelegraph.com/rss'),('OilPrice','Commodities','https://oilprice.com/rss/main'),('USGS Earthquakes','Natural events','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom')]
 GDELT=[('GDELT geopolitics','Geopolitics','geopolitics OR conflict OR war'),('GDELT trade','Geopolitics','tariff OR sanctions OR trade restriction'),('GDELT supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
+WORLD_MONITOR_API='https://api.worldmonitor.app/api'
+def worldmonitor_items():
+ out=[]; health={}; errors=[]
+ try:
+  raw=json.loads(fetch(WORLD_MONITOR_API+'/economic/v1/get-macro-signals').decode('utf8')); signals=raw.get('signals',{}); regime=signals.get('macroRegime',{}); flow=signals.get('flowStructure',{}); title='World Monitor macro regime: '+str(regime.get('status','updated')).replace('_',' '); summary='World Monitor reports macro regime '+str(regime.get('status','updated'))+'. QQQ 20-day ROC: '+str(regime.get('qqqRoc20','n/a'))+'; XLP 20-day ROC: '+str(regime.get('xlpRoc20','n/a'))+'.'; out.append(item(title,summary,WORLD_MONITOR_API+'/economic/v1/get-macro-signals',raw.get('timestamp',now()),'World Monitor','Macro'));health['World Monitor macro']={'ok':True,'count':1,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals'}
+ except Exception as e: health['World Monitor macro']={'ok':False,'count':0,'url':WORLD_MONITOR_API+'/economic/v1/get-macro-signals','error':str(e)[:160]};errors.append('World Monitor macro: '+str(e)[:120])
+ try:
+  raw=json.loads(fetch(WORLD_MONITOR_API+'/economic/v1/get-energy-prices').decode('utf8'))
+  prices=raw.get('prices',[])
+  for p in prices:
+   change=float(p.get('change',0) or 0)
+   if abs(change)>=1:
+    title='World Monitor energy price move: '+str(p.get('name') or p.get('commodity','energy'))
+    summary=f"World Monitor reports {p.get('commodity','energy')} at {p.get('price','n/a')} {p.get('unit','')} with change {change:+g}."
+    out.append(item(title,summary,WORLD_MONITOR_API+'/economic/v1/get-energy-prices',now(),'World Monitor','Commodities'))
+  health['World Monitor energy']={'ok':True,'count':len(prices),'url':WORLD_MONITOR_API+'/economic/v1/get-energy-prices'}
+ except Exception as e: health['World Monitor energy']={'ok':False,'count':0,'url':WORLD_MONITOR_API+'/economic/v1/get-energy-prices','error':str(e)[:160]};errors.append('World Monitor energy: '+str(e)[:120])
+ return out,health,errors
 state={'items':[],'last_refresh':None,'source_health':{},'errors':[],'refreshing':False}; lock=threading.Lock()
 def now():return datetime.now(timezone.utc).isoformat()
 def clean(s):return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',s or ''))).strip()
@@ -64,6 +82,7 @@ def fetch_all():
  for n,c,u in sources:
   try: got=parse(fetch(u),n,c,u);items+=got;health[n]={'ok':True,'count':len(got),'url':u}
   except Exception as e:health[n]={'ok':False,'count':0,'url':u,'error':str(e)[:160]};errors.append(n+': '+str(e)[:120])
+ wm_items,wm_health,wm_errors=worldmonitor_items();items+=wm_items;health.update(wm_health);errors.extend(wm_errors)
  return merge(items),health,errors
 def save(payload):
  os.makedirs(DATA,exist_ok=True);tmp=CACHE+'.tmp'
