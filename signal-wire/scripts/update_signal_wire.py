@@ -3,8 +3,8 @@
 import json, os, sys
 from datetime import datetime, timezone
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APP_ROOT = os.path.join(ROOT, "signal-wire")
+APP_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(APP_ROOT)
 sys.path.insert(0, APP_ROOT)
 import app
 
