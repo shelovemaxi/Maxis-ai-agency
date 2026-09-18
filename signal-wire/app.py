@@ -84,7 +84,9 @@ def fetch_all():
  return merge(items),health,errors
 def build_knowledge(items, previous=None):
  previous=previous or {}
- learned=dict(previous)
+ if isinstance(previous,list): learned={hashlib.sha1((str(r.get('category',''))+'|'+str(r.get('topic',''))).encode()).hexdigest()[:14]:r for r in previous if isinstance(r,dict)}
+ elif isinstance(previous,dict): learned=dict(previous)
+ else: learned={}
  for x in items:
   if x.get('score',0)<45 or (x.get('source_tier')!='official' and x.get('corroboration',1)<2): continue
   key=hashlib.sha1((x.get('category','')+'|'+re.sub(r'[^a-z0-9 ]','',x.get('title','').lower())[:140]).encode()).hexdigest()[:14]
