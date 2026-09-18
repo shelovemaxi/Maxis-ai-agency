@@ -102,7 +102,14 @@ def child(el,names):
  for c in list(el):
   if c.tag.split('}')[-1].lower() in names:return ''.join(c.itertext()).strip()
  return ''
-PRIMARY_SOURCES={'Federal Reserve','ECB','BLS','BEA','SEC','IMF DataMapper','Bank of Japan','Bank of Canada','Reserve Bank of Australia','Bank of England','CFTC','USGS Earthquakes'}
+PRIMARY_SOURCES={'Federal Reserve','ECB','BLS','BEA','SEC','IMF DataMapper','Bank of Japan','Bank of Canada','Reserve Bank of Australia','Bank of England','CFTC','USGS Earthquakes','RBNZ','Statistics New Zealand','ABS','PBoC'}
+MAJOR_FINANCIAL_SOURCES={'Reuters','Bloomberg','Financial Times','Wall Street Journal','CNBC','MarketWatch','Yahoo Finance','AP Business','BBC Business'}
+SPECIALIST_SOURCES={'Investing.com','Trading Economics','CoinDesk','Cointelegraph','OilPrice'}
+def source_tier(source, source_domain=''):
+    if source in PRIMARY_SOURCES or any(x in (source_domain or '').lower() for x in ('federalreserve.gov','bls.gov','bea.gov','imf.org','ecb.europa.eu','bankofengland.co.uk','boj.or.jp','bankofcanada.ca','rba.gov.au','cftc.gov','stats.govt.nz','abs.gov.au','pbc.gov.cn')): return 'official'
+    if source in MAJOR_FINANCIAL_SOURCES: return 'major financial'
+    if source in SPECIALIST_SOURCES: return 'specialist'
+    return 'discovery'
 def freshness_label(published):
  try: age=max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(date(published))).total_seconds())
  except Exception: age=10**9
@@ -118,7 +125,7 @@ def relationships(title,category):
  return out[:4]
 def item(title,summary,url,published,source,category,source_url=None,timestamp_kind='published'):
  a=analyse(title,summary,category); published_at=date(published); src_url=source_url or url; src_domain=domain(src_url)
- return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'excerpt':clean(summary)[:600],'url':url,'source':source,'domain':domain(url),'source_url':src_url,'source_domain':src_domain,'category':category,'published':published_at,'timestamp_kind':timestamp_kind,'freshness':freshness_label(published_at),'developing':freshness_label(published_at)=='developing','source_tier':'primary' if source in PRIMARY_SOURCES else 'reported','fact_status':'confirmed data' if source in PRIMARY_SOURCES else 'reported; not independently confirmed','score':a['score'],'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'relationships':relationships(title,category),'confidence':a.get('confidence','medium'),'sources':[{'name':source,'domain':src_domain,'url':url,'source_url':src_url,'title':title,'published':published_at}],'verification':'single-source','corroboration':1}
+ return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'excerpt':clean(summary)[:600],'url':url,'source':source,'domain':domain(url),'source_url':src_url,'source_domain':src_domain,'category':category,'published':published_at,'timestamp_kind':timestamp_kind,'freshness':freshness_label(published_at),'developing':freshness_label(published_at)=='developing','source_tier':source_tier(source,src_domain),'fact_status':'confirmed data' if source_tier(source,src_domain)=='official' else 'reported; not independently confirmed','score':a['score'],'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'relationships':relationships(title,category),'confidence':a.get('confidence','medium'),'sources':[{'name':source,'domain':src_domain,'url':url,'source_url':src_url,'title':title,'published':published_at,'timestamp_kind':timestamp_kind,'tier':source_tier(source,src_domain),'excerpt':clean(summary)[:600]}],'verification':'single-source','corroboration':1}
 def parse(raw,source,category,fallback):
  root=ET.fromstring(raw); out=[]
  for n in [e for e in root.iter() if e.tag.split('}')[-1].lower() in ('item','entry')][:60]:
@@ -140,24 +147,27 @@ def merge(items):
   matches=[i for i,g in enumerate(groups) if any(similar(g["title"],x["title"]) for g in [g])]
   if not matches: groups.append(x); continue
   base=groups[matches[0]]
-  existing={s.get("domain") for s in base.get("sources",[])}
+  existing={s.get("domain") or s.get("source_domain") for s in base.get("sources",[])}
   incoming=x.get("sources",[])[0] if x.get("sources") else {}
   if incoming.get("domain") not in existing: base.setdefault("sources",[]).append(incoming)
   # Prefer primary-source facts and the freshest, more complete headline.
-  if x.get("source_tier")=="primary" and base.get("source_tier")!="primary":
+  if x.get("source_tier")=="official" and base.get("source_tier")!="official":
    for key in ("title","summary","excerpt","url","source","domain","source_url","source_domain","published","timestamp_kind","source_tier","fact_status"): base[key]=x.get(key,base.get(key))
   base["corroboration"]=len({z.get("domain") for z in base.get("sources",[])})
+  tiers=[z.get("tier") for z in base.get("sources",[]) if z.get("tier")]
+  rank={"official":4,"major financial":3,"specialist":2,"discovery":1}
+  base["source_tier"]=max(tiers,key=lambda t:rank.get(t,0)) if tiers else base.get("source_tier","discovery")
   base["verification"]="verified" if base["corroboration"]>=2 else "single-source"
-  if base["corroboration"]>=2: base["fact_status"]="corroborated report" if base.get("source_tier")!="primary" else "confirmed data with independent reporting"
+  if base["corroboration"]>=2: base["fact_status"]="corroborated report" if base.get("source_tier")!="official" else "confirmed data with independent reporting"
   base["score"]=min(100,max(base.get("score",0),x.get("score",0))+ (8 if base["corroboration"]>=2 else 0))
   base["reasons"]=list(dict.fromkeys(base.get("reasons",[])+x.get("reasons",[])+(["independently corroborated"] if base["corroboration"]>=2 else [])))[:8]
-  base["confidence"]="high" if base["corroboration"]>=2 and base.get("source_tier")=="primary" else "medium" if base["corroboration"]>=2 else base.get("confidence","low")
+  base["confidence"]="high" if base["corroboration"]>=2 and base.get("source_tier")=="official" else "medium" if base["corroboration"]>=2 else base.get("confidence","low")
  out=[]
  for x in groups:
   x["level"]="High" if x["score"]>=65 else "Medium" if x["score"]>=35 else "Low"
   # Never surface low relevance noise, and put primary evidence first.
   if x["score"]>=35: out.append(x)
- return sorted(out,key=lambda x:(x.get("source_tier")=="primary",x.get("score",0),x.get("published","")),reverse=True)[:250]
+ return sorted(out,key=lambda x:(x.get("source_tier")=="official",x.get("score",0),x.get("published","")),reverse=True)[:250]
 
 def fetch_json(url):
  req=Request(url,headers={'User-Agent':'SignalWire/2.2 research dashboard','Accept':'application/json'})
