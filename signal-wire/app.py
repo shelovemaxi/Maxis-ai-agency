@@ -134,20 +134,31 @@ def fetch(url):
  req=Request(url,headers={'User-Agent':'SignalWire/2.0 research dashboard','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'});
  with urlopen(req,timeout=TIMEOUT) as r:return r.read()
 def merge(items):
+ # Build connected components so duplicate matching is not dependent on feed order.
  groups=[]
  for x in items:
-  group=next((g for g in groups if similar(g['title'],x['title'])),None)
-  if not group:groups.append(x);continue
-  if x.get('source_domain',x['domain']) not in {s.get('domain') for s in group['sources']}:
-   group['sources'].append(x['sources'][0]);group['corroboration']=len(group['sources'])
-   group['verification']='verified' if group['corroboration']>=2 else 'single-source'; group['fact_status']='corroborated report' if group['corroboration']>=2 else group.get('fact_status','reported; not independently confirmed'); group['score']=min(100,group['score']+8)
-   group['reasons']=list(dict.fromkeys(group['reasons']+['independently corroborated']))[:8]
- # Only publish material events; source-verified does not mean true, only independently reported.
+  matches=[i for i,g in enumerate(groups) if any(similar(g["title"],x["title"]) for g in [g])]
+  if not matches: groups.append(x); continue
+  base=groups[matches[0]]
+  existing={s.get("domain") for s in base.get("sources",[])}
+  incoming=x.get("sources",[])[0] if x.get("sources") else {}
+  if incoming.get("domain") not in existing: base.setdefault("sources",[]).append(incoming)
+  # Prefer primary-source facts and the freshest, more complete headline.
+  if x.get("source_tier")=="primary" and base.get("source_tier")!="primary":
+   for key in ("title","summary","excerpt","url","source","domain","source_url","source_domain","published","timestamp_kind","source_tier","fact_status"): base[key]=x.get(key,base.get(key))
+  base["corroboration"]=len({z.get("domain") for z in base.get("sources",[])})
+  base["verification"]="verified" if base["corroboration"]>=2 else "single-source"
+  if base["corroboration"]>=2: base["fact_status"]="corroborated report" if base.get("source_tier")!="primary" else "confirmed data with independent reporting"
+  base["score"]=min(100,max(base.get("score",0),x.get("score",0))+ (8 if base["corroboration"]>=2 else 0))
+  base["reasons"]=list(dict.fromkeys(base.get("reasons",[])+x.get("reasons",[])+(["independently corroborated"] if base["corroboration"]>=2 else [])))[:8]
+  base["confidence"]="high" if base["corroboration"]>=2 and base.get("source_tier")=="primary" else "medium" if base["corroboration"]>=2 else base.get("confidence","low")
  out=[]
  for x in groups:
-  x['level']='High' if x['score']>=65 else 'Medium' if x['score']>=35 else 'Low'
-  if x['score']>=35:out.append(x)
- return sorted(out,key=lambda x:(x['score'],x['published']),reverse=True)[:250]
+  x["level"]="High" if x["score"]>=65 else "Medium" if x["score"]>=35 else "Low"
+  # Never surface low relevance noise, and put primary evidence first.
+  if x["score"]>=35: out.append(x)
+ return sorted(out,key=lambda x:(x.get("source_tier")=="primary",x.get("score",0),x.get("published","")),reverse=True)[:250]
+
 def fetch_json(url):
  req=Request(url,headers={'User-Agent':'SignalWire/2.2 research dashboard','Accept':'application/json'})
  with urlopen(req,timeout=TIMEOUT) as r:return json.loads(r.read().decode('utf8'))
