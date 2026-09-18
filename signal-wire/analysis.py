@@ -16,6 +16,13 @@ MARKET_TERMS={
 NOISE_TERMS={'sponsored':18,'opinion':10,'podcast':8,'recipe':15,'quiz':12,'how to':8,'video':3,'slideshow':8}
 TIER_WEIGHT={'official':20,'major-financial':12,'specialist':6,'discovery':0}
 
+def relevance_for_score(score: int) -> str:
+    if score >= 65:
+        return 'High-priority market signal: broad, material, or policy-sensitive.'
+    if score >= 35:
+        return 'Potentially market-relevant; verify the key claim before relying on it.'
+    return 'Below the materiality threshold unless new evidence changes the picture.'
+
 def why_it_matters_for(text: str, score: int = 0) -> str:
     """Use a concrete transmission path instead of a generic market disclaimer."""
     t = (text or '').lower()
@@ -49,9 +56,7 @@ def rule_analysis(title: str, summary: str, category: str, source_tier: str='dis
     breadth=min(14,len(set(hits))*2)
     source_priority=TIER_WEIGHT.get(source_tier,0)
     score=max(0,min(100,market_signal+magnitude+breadth+source_priority-noise))
-    if score>=65: relevance='High-priority market signal: broad, material, or policy-sensitive.'
-    elif score>=35: relevance='Potentially market-relevant; verify the key claim before relying on it.'
-    else: relevance='Below the materiality threshold unless new evidence changes the picture.'
+    relevance=relevance_for_score(score)
     assets=[]
     if any(k in text for k in ('rate','inflation','cpi','jobs','payroll','gdp','yield','treasury')): assets += ['government bonds','FX','rate-sensitive equities']
     if any(k in text for k in ('oil','gas','opec','supply','shipping','energy')): assets += ['energy','commodities','inflation-sensitive assets']
