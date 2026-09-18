@@ -102,16 +102,33 @@ def child(el,names):
  for c in list(el):
   if c.tag.split('}')[-1].lower() in names:return ''.join(c.itertext()).strip()
  return ''
-def item(title,summary,url,published,source,category):
- a=analyse(title,summary,category)
- return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'url':url,'source':source,'domain':domain(url),'category':category,'published':date(published),'score':a['score'],'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'confidence':a.get('confidence','medium'),'sources':[{'name':source,'domain':domain(url),'url':url,'title':title}],'verification':'single-source','corroboration':1}
+PRIMARY_SOURCES={'Federal Reserve','ECB','BLS','BEA','SEC','IMF DataMapper','Bank of Japan','Bank of Canada','Reserve Bank of Australia','Bank of England','CFTC','USGS Earthquakes'}
+def freshness_label(published):
+ try: age=max(0,(datetime.now(timezone.utc)-datetime.fromisoformat(date(published))).total_seconds())
+ except Exception: age=10**9
+ if age < 6*3600:return 'developing'
+ if age < 48*3600:return 'recent'
+ return 'older'
+def relationships(title,category):
+ text=(title+' '+category).lower(); out=[]
+ if any(k in text for k in ('central bank','interest rate','rate decision','monetary policy','inflation','cpi')): out += ['rates → government bonds','rates → currency markets','rates → bank and growth-sensitive equities']
+ if any(k in text for k in ('oil','gas','opec','energy','supply disruption')): out += ['energy supply → inflation expectations','energy prices → transport and industrial margins']
+ if any(k in text for k in ('tariff','sanction','trade','export ban')): out += ['trade policy → currencies and exporters','trade friction → supply chains and inflation']
+ if any(k in text for k in ('jobs','payroll','employment','recession','gdp')): out += ['growth data → rates and bond yields','growth data → cyclical equities and currency']
+ return out[:4]
+def item(title,summary,url,published,source,category,source_url=None,timestamp_kind='published'):
+ a=analyse(title,summary,category); published_at=date(published); src_url=source_url or url; src_domain=domain(src_url)
+ return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'excerpt':clean(summary)[:600],'url':url,'source':source,'domain':domain(url),'source_url':src_url,'source_domain':src_domain,'category':category,'published':published_at,'timestamp_kind':timestamp_kind,'freshness':freshness_label(published_at),'developing':freshness_label(published_at)=='developing','source_tier':'primary' if source in PRIMARY_SOURCES else 'reported','fact_status':'confirmed data' if source in PRIMARY_SOURCES else 'reported; not independently confirmed','score':a['score'],'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'relationships':relationships(title,category),'confidence':a.get('confidence','medium'),'sources':[{'name':source,'domain':src_domain,'url':url,'source_url':src_url,'title':title,'published':published_at}],'verification':'single-source','corroboration':1}
 def parse(raw,source,category,fallback):
  root=ET.fromstring(raw); out=[]
  for n in [e for e in root.iter() if e.tag.split('}')[-1].lower() in ('item','entry')][:60]:
   title=clean(child(n,{'title'})); link=child(n,{'link'})
   for c in list(n):
    if c.tag.split('}')[-1].lower()=='link' and c.attrib.get('href'):link=c.attrib['href'];break
-  if title:out.append(item(title,clean(child(n,{'description','summary','content','encoded'})),link or fallback,child(n,{'pubdate','published','updated','date'}),source,category))
+  source_url=''
+  for c in list(n):
+   if c.tag.split('}')[-1].lower()=='source': source_url=c.attrib.get('url','') or clean(''.join(c.itertext()))
+  if title:out.append(item(title,clean(child(n,{'description','summary','content','encoded'})),link or fallback,child(n,{'pubdate','published','updated','date'}),source,category,source_url or None))
  return out
 def fetch(url):
  req=Request(url,headers={'User-Agent':'SignalWire/2.0 research dashboard','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'});
@@ -121,9 +138,9 @@ def merge(items):
  for x in items:
   group=next((g for g in groups if similar(g['title'],x['title'])),None)
   if not group:groups.append(x);continue
-  if x['domain'] not in {s['domain'] for s in group['sources']}:
+  if x.get('source_domain',x['domain']) not in {s.get('domain') for s in group['sources']}:
    group['sources'].append(x['sources'][0]);group['corroboration']=len(group['sources'])
-   group['verification']='verified' if group['corroboration']>=2 else 'single-source'; group['score']=min(100,group['score']+8)
+   group['verification']='verified' if group['corroboration']>=2 else 'single-source'; group['fact_status']='corroborated report' if group['corroboration']>=2 else group.get('fact_status','reported; not independently confirmed'); group['score']=min(100,group['score']+8)
    group['reasons']=list(dict.fromkeys(group['reasons']+['independently corroborated']))[:8]
  # Only publish material events; source-verified does not mean true, only independently reported.
  out=[]
@@ -145,7 +162,7 @@ def json_items(raw,source,category,url):
  latest=latest[:12]
  if not latest:return []
  summary='IMF DataMapper real GDP growth observations: '+', '.join(f'{c} {v}% ({y})' for c,v,y in latest if isinstance(v,(int,float)))
- return [item('IMF DataMapper: real GDP growth snapshot',summary,url,now(),source,category)]
+ return [item('IMF DataMapper: real GDP growth snapshot',summary,url,now(),source,category,url,'retrieved_at')]
 def fetch_all():
  publisher_sources=[(n,c,'https://news.google.com/rss/search?q='+quote_plus(q)+'&hl=en-US&gl=US&ceid=US:en') for n,c,q in PUBLISHER_QUERIES]
  sources=SOURCES+publisher_sources+[(n,c,'https://news.google.com/rss/search?q='+quote_plus(q)+'&hl=en-US&gl=US&ceid=US:en') for n,c,q in GDELT]; items=[];health={};errors=[]
