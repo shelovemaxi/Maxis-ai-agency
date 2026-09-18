@@ -1,5 +1,78 @@
-# Source coverage update
+# Signal Wire
 
-Signal Wire now includes the existing Federal Reserve, ECB, BLS, SEC, CNBC, Yahoo Finance, CoinDesk, Cointelegraph, OilPrice, and USGS feeds plus BEA, IMF DataMapper, Bank of Japan, Bank of Canada, Reserve Bank of Australia, Bank of England, and CFTC feeds. It also adds public publisher-labelled RSS searches for Reuters, Bloomberg, Financial Times, Wall Street Journal, MarketWatch, Investing.com, AP Business, BBC Business, and Trading Economics where stable open RSS is not exposed.
+Signal Wire is a local, no-signup market intelligence dashboard for macro, equities, crypto, commodities, geopolitics, and natural events. It uses free public RSS/Atom feeds plus official primary-data endpoints. It does **not** scrape Twitter/X and does not require paid World Monitor APIs.
 
-Publisher-indexed headlines are leads, not proof. The existing deduplication and independent-domain corroboration rules remain authoritative; primary-data values are labeled as data snapshots and do not independently verify a news claim.
+## Source coverage
+
+The collector includes Federal Reserve, ECB, BLS, BEA, SEC, CNBC, Yahoo Finance, CoinDesk, Cointelegraph, OilPrice, and USGS feeds, plus IMF DataMapper, Bank of Japan, Bank of Canada, Reserve Bank of Australia, Bank of England, and CFTC feeds. It also monitors public publisher-indexed RSS results for Reuters, Bloomberg, Financial Times, Wall Street Journal, MarketWatch, Investing.com, AP Business, BBC Business, and Trading Economics where those publishers do not expose a stable open RSS endpoint.
+
+Publisher-indexed headlines are leads, not proof. Signal Wire deduplicates similar events, keeps original links, and requires independent domains for corroboration. Primary-data snapshots are labeled as confirmed data and do not independently verify a news claim. Paywalled publisher content is not bypassed.
+
+## Quick start
+
+### Linux/macOS
+```bash
+cd signal-wire
+python3 -m venv .venv
+. .venv/bin/activate
+pip install -r requirements.txt
+./run.sh
+```
+
+### Windows PowerShell
+```powershell
+cd signal-wire
+py -m venv .venv
+.\\.venv\\Scripts\\Activate.ps1
+.\\run.bat
+```
+
+Open http://127.0.0.1:5050. Flask is optional: without it, the app starts a standard-library server with API access and a minimal landing page.
+
+## GitHub Pages deployment
+
+The `docs/` folder is a static, GitHub Pages-compatible version. It reads the checked-in `docs/data.json` snapshot, so it works without a server or API key. The included workflow at `.github/workflows/update-signal-wire.yml` refreshes that snapshot every 15 minutes using public feeds.
+
+After pushing this folder to a repository:
+
+1. Open **Settings → Pages**.
+2. Choose **Deploy from a branch**.
+3. Select `main` and the `/docs` folder, then save.
+4. In **Actions**, run **Refresh Signal Wire data** once manually if you want an immediate update.
+
+The project URL will normally be `https://USERNAME.github.io/REPOSITORY/signal-wire/`.
+
+## Endpoints
+- `/` dashboard
+- `/api/items` current cached signals
+- `POST /api/refresh` force a refresh (asynchronous)
+- `/api/status` source health, cache status, and errors
+- `/health` liveness JSON
+
+## How it works
+
+Feeds and queries are configured near the top of `app.py`. Requests use a timeout and descriptive User-Agent. XML and JSON are parsed with the Python standard library. Each item receives transparent phrase-based weights for rate decisions, inflation, jobs, recession, sanctions, tariffs, conflict, OPEC, energy, disruptions, failures, hacks, ETFs, liquidations, and other signals; noise phrases reduce scores. Percentage moves contribute a capped boost. Scores are 0–100. Normalized duplicate titles are collapsed and items reported by multiple distinct domains get a corroboration boost. The UI shows matched reasons, source, timestamp, and original link.
+
+The cache is written atomically to `data/cache.json`; if a refresh fails, the last successful data remains available. Automatic refresh is limited to every 15 minutes, while the dashboard polls status periodically. Threshold and filter preferences are stored only in browser localStorage.
+
+## Talk to Signal Wire AI
+
+The dashboard includes an AI analyst panel. GitHub Pages cannot keep a Gemini key private, so the repository includes a small Cloudflare Worker in `worker/` that acts as the secure backend.
+
+1. Install Wrangler or use the Cloudflare dashboard's Workers editor.
+2. Create a Worker from `worker/index.js` and set the variable/secret `GEMINI_API_KEY` to your Gemini key. Never commit the key.
+3. Deploy the Worker and copy its `https://...workers.dev` URL.
+4. Open Signal Wire, expand **AI connection settings**, paste the URL, and save it.
+
+The browser sends the current filtered events with each question. The Worker instructs Gemini to use only that evidence, disclose uncertainty, respect the two-domain verification rule, and avoid personalized financial advice. The key never reaches GitHub Pages or the browser.
+
+## Limitations, privacy, and safety
+
+Feeds can be delayed, blocked, malformed, rate-limited, or unavailable. Some publishers change RSS URLs or restrict access. Google News publisher-indexed RSS is used only where a stable publisher feed is unavailable; it is not treated as a primary source. Scores are rule-based prioritization, not predictions, fact verification, or investment advice. Always open the original source and independently verify important information. Do not make trading decisions solely from this dashboard.
+
+## Troubleshooting
+
+- Check `/api/status` for per-source errors.
+- If port 5050 is busy, run `PORT=5051 python3 app.py` (PowerShell: `$env:PORT=5051; py app.py`).
+- A firewall, proxy, DNS issue, or publisher rate limit can cause feed failures; cached data will still display after the first successful refresh.
+- If Flask installation is unavailable, the standard-library fallback still serves `/health` and JSON endpoints; install requirements for the full UI.
