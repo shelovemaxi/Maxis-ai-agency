@@ -19,9 +19,10 @@ TIER_WEIGHT={'official':20,'major-financial':12,'specialist':6,'discovery':0}
 def rule_analysis(title: str, summary: str, category: str, source_tier: str='discovery')->dict:
     text=(title+' '+summary).lower(); hits=[]; raw_signal=0; noise=0
     for term,weight in MARKET_TERMS.items():
-        if term in text: raw_signal+=weight; hits.append(term)
+        # Match complete words/phrases only: "war" must not score "Warren".
+        if re.search(r'(?<!\w)'+re.escape(term)+r'(?!\w)', text): raw_signal+=weight; hits.append(term)
     for term,weight in NOISE_TERMS.items():
-        if term in text: noise+=weight
+        if re.search(r'(?<!\w)'+re.escape(term)+r'(?!\w)', text): noise+=weight
     magnitude=0
     for match in re.finditer(r'(?<!\w)([+-]?\d+(?:\.\d+)?)\s*%',text):
         magnitude+=min(18,round(abs(float(match.group(1)))*1.2));hits.append(match.group(1)+'% move')
