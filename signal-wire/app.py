@@ -295,7 +295,14 @@ def build_knowledge(items, previous=None):
     if isinstance(previous, dict): previous = previous.get('entries', [])
     learned = {}
     for row in previous or []:
-        if isinstance(row, dict): learned[row.get('key') or hashlib.sha1(str(row).encode()).hexdigest()[:14]] = row
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get('verification', '')).lower()
+        # Do not carry forward legacy or downgraded claims into persistent memory.
+        # Only explicit confirmation/corroboration survives a refresh.
+        admitted = ('confirmed' in status or 'corroborated' in status or '2+ source' in status) and 'unverified' not in status
+        if admitted and row.get('evidence_urls'):
+            learned[row.get('key') or hashlib.sha1(str(row).encode()).hexdigest()[:14]] = row
     for event in items:
         if event.get('score', 0) < 45 or event.get('verification') not in ('confirmed', 'verified'):
             continue
