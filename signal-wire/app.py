@@ -23,39 +23,42 @@ PORT = int(os.getenv('PORT', '5050'))
 TIMEOUT = 12
 MAX_PER_SOURCE = 45
 RELEVANCE_THRESHOLD = 35
+# Some otherwise valid public feeds contain illegal control characters. Strip only
+# XML-invalid bytes before parsing; never rewrite article content or URLs.
+XML_INVALID = re.compile(r'[\x00-\x08\x0b\x0c\x0e-\x1f]')
 
 # Public feeds only. A failed optional feed is logged in source_health and never
 # stops the other sources. The explicit tier is more trustworthy than guessing
 # from a publisher name later in the pipeline.
-def feed(name, category, url, tier):
-    return {'name': name, 'category': category, 'url': url, 'tier': tier, 'access': 'public RSS/Atom'}
+def feed(name, category, url, tier, enabled=True, note=''):
+    return {'name': name, 'category': category, 'url': url, 'tier': tier, 'access': 'public RSS/Atom', 'enabled': enabled, 'note': note}
 
 SOURCES = [
     # Tier 1: official / primary data and releases
     feed('Federal Reserve', 'Macro', 'https://www.federalreserve.gov/feeds/press_all.xml', 'official'),
-    feed('FRED', 'Macro', 'https://fred.stlouisfed.org/feeds/series/DFII10', 'official'),
+    feed('FRED', 'Macro', 'https://fredblog.stlouisfed.org/feed/', 'official'),
     feed('BLS', 'Macro', 'https://www.bls.gov/feed/bls_latest.rss', 'official'),
-    feed('BEA', 'Macro', 'https://www.bea.gov/news/rss.xml', 'official'),
-    feed('Census Bureau', 'Macro', 'https://www.census.gov/newsroom/press-releases.rss', 'official'),
+    feed('BEA', 'Macro', 'https://apps.bea.gov/rss/rss.xml', 'official'),
+    feed('Census Bureau', 'Macro', 'https://www.census.gov/content/census/en/newsroom/press-releases.xml', 'official'),
     feed('SEC / EDGAR', 'Equities', 'https://www.sec.gov/news/pressreleases.rss', 'official'),
-    feed('US Treasury', 'Macro', 'https://home.treasury.gov/rss/press-releases.xml', 'official'),
-    feed('CFTC', 'Commodities', 'https://www.cftc.gov/RSS/PressReleases.xml', 'official'),
-    feed('New York Fed', 'Macro', 'https://www.newyorkfed.org/rss/research.xml', 'official'),
-    feed('Atlanta Fed', 'Macro', 'https://www.atlantafed.org/rss', 'official'),
-    feed('Dallas Fed', 'Macro', 'https://www.dallasfed.org/rss', 'official'),
+    feed('US Treasury', 'Macro', 'https://home.treasury.gov/news/press-releases', 'official', False, 'No unrestricted Treasury RSS endpoint verified; official press-release page retained for manual verification.'),
+    feed('CFTC', 'Commodities', 'https://www.cftc.gov/RSS/RSSGP/rssgp.xml', 'official'),
+    feed('New York Fed', 'Macro', 'https://libertystreeteconomics.newyorkfed.org/feed/', 'official'),
+    feed('Atlanta Fed', 'Macro', 'https://www.atlantafed.org/rss/pressindex', 'official'),
+    feed('Dallas Fed', 'Macro', 'https://www.dallasfed.org/rss/releases.xml', 'official'),
     feed('ECB', 'Macro', 'https://www.ecb.europa.eu/rss/press.html', 'official'),
     feed('Bank of England', 'Macro', 'https://www.bankofengland.co.uk/rss/news', 'official'),
     feed('Bank of Japan', 'Macro', 'https://www.boj.or.jp/en/rss/whatsnew.xml', 'official'),
     feed('Reserve Bank of Australia', 'Macro', 'https://www.rba.gov.au/rss/rss-cb-media-releases.xml', 'official'),
-    feed('Reserve Bank of New Zealand', 'Macro', 'https://www.rbnz.govt.nz/rss', 'official'),
-    feed('Bank of Canada', 'Macro', 'https://www.bankofcanada.ca/feed/press-releases/', 'official'),
-    feed('Swiss National Bank', 'Macro', 'https://www.snb.ch/en/rss/press_releases', 'official'),
-    feed('Norges Bank', 'Macro', 'https://www.norges-bank.no/en/rss/', 'official'),
-    feed('BIS', 'Macro', 'https://www.bis.org/doclist/all.rss', 'official'),
-    feed('IMF', 'Macro', 'https://www.imf.org/en/News/RSS', 'official'),
-    feed('EIA', 'Commodities', 'https://www.eia.gov/rss/news.xml', 'official'),
+    feed('Reserve Bank of New Zealand', 'Macro', 'https://www.rbnz.govt.nz/rss', 'official', False, 'Public RSS endpoint was not available during audit; official news page remains a verification link.'),
+    feed('Bank of Canada', 'Macro', 'https://www.bankofcanada.ca/content_type/press-releases/feed/', 'official'),
+    feed('Swiss National Bank', 'Macro', 'https://www.snb.ch/public/rss/en/pressrel', 'official'),
+    feed('Norges Bank', 'Macro', 'https://www.norges-bank.no/en/news-events/news/', 'official', False, 'Official news page has no stable unrestricted RSS endpoint verified.'),
+    feed('BIS', 'Macro', 'https://www.bis.org/doclist/all_pressrels.rss', 'official'),
+    feed('IMF', 'Macro', 'https://www.imf.org/external/rss/feeds.aspx?category=whatsnew_eng', 'official', False, 'IMF feed endpoint returned method-not-allowed during audit; no bypass attempted.'),
+    feed('EIA', 'Commodities', 'https://www.eia.gov/rss/todayinenergy.xml', 'official'),
     # Tier 2: major financial and business reporting
-    feed('Reuters', 'Macro', 'https://feeds.reuters.com/reuters/businessNews', 'major-financial'),
+    feed('Reuters', 'Macro', 'https://www.reuters.com/my-news/feed/', 'major-financial', False, 'Reuters public feed requires account access; no bypass attempted.'),
     feed('CNBC', 'Equities', 'https://www.cnbc.com/id/100003114/device/rss/rss.html', 'major-financial'),
     feed('Bloomberg Markets', 'Macro', 'https://feeds.bloomberg.com/markets/news.rss', 'major-financial'),
     feed('Financial Times', 'Macro', 'https://www.ft.com/?format=rss', 'major-financial'),
@@ -64,8 +67,8 @@ SOURCES = [
     feed('Yahoo Finance', 'Equities', 'https://finance.yahoo.com/news/rssindex', 'major-financial'),
     feed('Business Insider', 'Equities', 'https://www.businessinsider.com/rss', 'major-financial'),
     feed('Forbes', 'Equities', 'https://www.forbes.com/business/feed/', 'major-financial'),
-    feed('Fortune', 'Equities', 'https://fortune.com/feed/fortune-feeds/', 'major-financial'),
-    feed('Investopedia', 'Macro', 'https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_articles', 'major-financial'),
+    feed('Fortune', 'Equities', 'https://fortune.com/feed/fortune-feeds/', 'major-financial', False, 'Public endpoint currently returns a webpage rather than RSS; no scraping workaround used.'),
+    feed('Investopedia', 'Macro', 'https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_articles', 'major-financial', False, 'Public feed currently blocks automated access; no bypass attempted.'),
     feed('Nasdaq', 'Equities', 'https://www.nasdaq.com/feed/rssoutbound?category=Markets', 'major-financial'),
     feed('BBC Business', 'Macro', 'https://feeds.bbci.co.uk/news/business/rss.xml', 'major-financial'),
     # Tier 3: specialist and discovery leads; never sufficient alone for a hard fact
@@ -76,17 +79,17 @@ SOURCES = [
     feed('Benzinga', 'Equities', 'https://www.benzinga.com/feed', 'specialist'),
     feed('CoinDesk', 'Crypto', 'https://www.coindesk.com/arc/outboundfeeds/rss/', 'specialist'),
     feed('Cointelegraph', 'Crypto', 'https://cointelegraph.com/rss', 'specialist'),
-    feed('Cboe', 'Equities', 'https://www.cboe.com/rss/news/', 'specialist'),
-    feed('Barrons', 'Equities', 'https://feeds.a.dj.com/rss/RSSBarrons.xml', 'specialist'),
+    feed('Cboe', 'Equities', 'https://www.cboe.com/rss/news/', 'specialist', False, 'Cboe does not expose a verified general-news RSS endpoint; no paid news API used.'),
+    feed('Barrons', 'Equities', 'https://feeds.a.dj.com/rss/RSSBarrons.xml', 'specialist', False, 'Public feed currently returns 403; no bypass attempted.'),
     feed('Investor’s Business Daily', 'Equities', 'https://www.investors.com/feed/', 'specialist'),
     feed('OilPrice', 'Commodities', 'https://oilprice.com/rss/main', 'specialist'),
-    feed('Eulerpool', 'Macro', 'https://eulerpool.com/en/rss', 'specialist'),
+    feed('Eulerpool', 'Macro', 'https://eulerpool.com/en/rss', 'specialist', False, 'Public RSS endpoint returned 404 during audit; no API key or scrape workaround used.'),
     feed('USGS Earthquakes', 'Natural events', 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom', 'discovery'),
 ]
-GDELT = [
-    ('GDELT geopolitics', 'Geopolitics', 'geopolitics OR conflict OR war'),
-    ('GDELT trade', 'Geopolitics', 'tariff OR sanctions OR trade restriction'),
-    ('GDELT supply', 'Commodities', 'oil OR gas OR OPEC OR supply disruption'),
+DISCOVERY = [
+    ('Public news discovery: geopolitics', 'Geopolitics', 'geopolitics OR conflict OR war'),
+    ('Public news discovery: trade', 'Geopolitics', 'tariff OR sanctions OR trade restriction'),
+    ('Public news discovery: supply', 'Commodities', 'oil OR gas OR OPEC OR supply disruption'),
 ]
 state = {'items': [], 'last_refresh': None, 'source_health': {}, 'errors': [], 'refreshing': False}
 lock = threading.Lock()
@@ -135,7 +138,8 @@ def child(element, names):
     return ''
 
 def parse(raw, spec, fallback):
-    root = ET.fromstring(raw)
+    text = raw.decode('utf-8', errors='replace') if isinstance(raw, (bytes, bytearray)) else str(raw)
+    root = ET.fromstring(XML_INVALID.sub('', text))
     output = []
     nodes = [e for e in root.iter() if e.tag.split('}')[-1].lower() in ('item', 'entry')][:MAX_PER_SOURCE]
     for node in nodes:
@@ -188,6 +192,24 @@ def distinct_sources(group):
         seen_urls.add(key); rows.append(source)
     return rows
 
+WIRE_ORIGINS = {
+    'reuters': re.compile(r'\\breuters\\b', re.I),
+    'associated press': re.compile(r'\\b(associated press|the ap|ap news)\\b', re.I),
+    'bloomberg': re.compile(r'\\bbloomberg\\b', re.I),
+}
+def underlying_family(source):
+    """Estimate the information chain so syndicated copy is not counted twice.
+    This is deliberately conservative: it collapses only explicit wire/origin
+    references and otherwise keeps the publisher as an independent family.
+    """
+    text = ' '.join(str(source.get(k, '')) for k in ('title', 'excerpt', 'url')).lower()
+    for origin, pattern in WIRE_ORIGINS.items():
+        if pattern.search(text):
+            return origin
+    return str(source.get('source_family') or source.get('name') or source.get('domain') or 'unknown').lower()
+def independent_count(sources):
+    return len({underlying_family(s) for s in sources if underlying_family(s) not in ('', 'unknown')})
+
 def merge(items):
     groups = []
     # Official feeds are placed first so their titles/claims anchor a cluster.
@@ -209,7 +231,8 @@ def merge(items):
                 match[key] = current.get(key, match.get(key))
             match['score_breakdown'] = current.get('score_breakdown', match.get('score_breakdown', {}))
         match['source_tier'] = max((s.get('tier', 'discovery') for s in match['sources']), key=lambda z: ['discovery', 'specialist', 'major-financial', 'official'].index(z))
-        match['corroboration'] = len({s.get('domain') for s in match['sources'] if s.get('domain') not in ('', 'unknown')})
+        match['corroboration'] = independent_count(match['sources'])
+        match['independent_domains'] = len({s.get('domain') for s in match['sources'] if s.get('domain') not in ('', 'unknown')})
         match['score'] = min(100, int(match.get('score', 0)) + min(16, 5 * max(0, match['corroboration'] - 1)))
         match['reasons'] = list(dict.fromkeys(match.get('reasons', []) + ['cross-source support']))[:8]
 
@@ -218,13 +241,15 @@ def merge(items):
         sources = distinct_sources(event)
         official = [s for s in sources if s.get('tier') == 'official']
         domains = {s.get('domain') for s in sources if s.get('domain') not in ('', 'unknown')}
+        independent = independent_count(sources)
         event['sources'] = sources
-        event['corroboration'] = len(domains)
+        event['corroboration'] = independent
+        event['independent_domains'] = len(domains)
         event['source_count'] = len(sources)
-        event['verification'] = 'confirmed' if official else 'verified' if len(domains) >= 2 else 'single-source'
-        event['event_status'] = 'confirmed' if official else 'corroborated' if len(domains) >= 2 else 'developing' if event.get('source_tier') in ('major-financial', 'specialist') else 'unverified'
-        event['verification_label'] = 'Confirmed official data' if official else 'Corroborated across 2+ domains' if len(domains) >= 2 else 'Reported lead — verify carefully'
-        event['confidence'] = 'high' if official and len(domains) >= 2 else 'medium' if official or len(domains) >= 2 else 'low'
+        event['verification'] = 'confirmed' if official else 'verified' if independent >= 2 else 'single-source'
+        event['event_status'] = 'confirmed' if official else 'corroborated' if independent >= 2 else 'developing' if event.get('source_tier') in ('major-financial', 'specialist') else 'unverified'
+        event['verification_label'] = 'Confirmed official data' if official else 'Corroborated across 2+ independent information chains' if independent >= 2 else 'Reported lead — verify carefully'
+        event['confidence'] = 'high' if official and independent >= 2 else 'medium' if official or independent >= 2 else 'low'
         text = (event.get('title', '') + ' ' + event.get('summary', '')).lower()
         links = []
         if any(k in text for k in ('rate', 'central bank', 'inflation', 'cpi', 'jobs', 'payroll', 'yield')): links += ['policy/growth → bonds', 'policy expectations → currencies']
@@ -251,8 +276,11 @@ def freshness(value):
         return 'Timestamp uncertain'
 
 def fetch_all():
-    sources = list(SOURCES) + [feed(n, c, 'https://api.gdeltproject.org/api/v2/doc/doc?query=' + quote_plus(q) + '&mode=artlist&maxrecords=30&format=rss&sort=datedesc', 'discovery') for n, c, q in GDELT]
+    sources = [s for s in SOURCES if s.get('enabled', True)] + [feed(n, c, 'https://news.google.com/rss/search?q=' + quote_plus(q) + '&hl=en-US&gl=US&ceid=US:en', 'discovery') for n, c, q in DISCOVERY]
     items, health, errors = [], {}, []
+    for spec in SOURCES:
+        if not spec.get('enabled', True):
+            health[spec['name']] = {'ok': False, 'skipped': True, 'count': 0, 'url': spec['url'], 'tier': spec['tier'], 'access': spec['access'], 'error': spec.get('note', 'Disabled until a public feed is verified.')}
     with ThreadPoolExecutor(max_workers=10) as pool:
         futures = [pool.submit(fetch_one, spec) for spec in sources]
         for future in as_completed(futures):
