@@ -14,7 +14,7 @@ try:
 except ImportError: HAS_FLASK=False
 BASE=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(BASE,'data'); CACHE=os.path.join(DATA,'cache.json'); PORT=int(os.getenv('PORT','5050')); TIMEOUT=14; REFRESH_SECONDS=900
 SOURCES=[('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),('CNBC','Equities','https://www.cnbc.com/id/100003114/device/rss/rss.html'),('Yahoo Finance','Equities','https://finance.yahoo.com/news/rssindex'),('CoinDesk','Crypto','https://www.coindesk.com/arc/outboundfeeds/rss/'),('Cointelegraph','Crypto','https://cointelegraph.com/rss'),('OilPrice','Commodities','https://oilprice.com/rss/main'),('USGS Earthquakes','Natural events','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom')]
-GDELT=[('GDELT geopolitics','Geopolitics','geopolitics OR conflict OR war'),('GDELT trade','Geopolitics','tariff OR sanctions OR trade restriction'),('GDELT supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
+GDELT=[('Google News geopolitics','Geopolitics','geopolitics OR conflict OR war'),('Google News trade','Geopolitics','tariff OR sanctions OR trade restriction'),('Google News supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
 WORLD_MONITOR_API='https://api.worldmonitor.app/api'
 def worldmonitor_items():
  """Fetch optional World Monitor signals without making refresh fragile.
@@ -119,10 +119,12 @@ def merge(items):
   if x['score']>=35:out.append(x)
  return sorted(out,key=lambda x:(x['score'],x['published']),reverse=True)[:250]
 def fetch_all():
- sources=SOURCES+[(n,c,'https://api.gdeltproject.org/api/v2/doc/doc?query='+quote_plus(q)+'&mode=artlist&maxrecords=30&format=rss&sort=datedesc') for n,c,q in GDELT]; items=[];health={};errors=[]
+ sources=SOURCES+[(n,c,'https://news.google.com/rss/search?q='+quote_plus(q)+'&hl=en-US&gl=US&ceid=US:en') for n,c,q in GDELT]; items=[];health={};errors=[]
  for n,c,u in sources:
-  try: got=parse(fetch(u),n,c,u);items+=got;health[n]={'ok':True,'count':len(got),'url':u}
-  except Exception as e:health[n]={'ok':False,'count':0,'url':u,'error':str(e)[:160]};errors.append(n+': '+str(e)[:120])
+  try:
+   got=parse(fetch(u),n,c,u);items+=got;health[n]={'ok':True,'count':len(got),'url':u}
+  except Exception as e:
+   health[n]={'ok':False,'count':0,'url':u,'error':str(e)[:160]};errors.append(n+': '+str(e)[:120])
  wm_items,wm_health,wm_errors=worldmonitor_items();items+=wm_items;health.update(wm_health);errors.extend(wm_errors)
  return merge(items),health,errors
 def save(payload):
