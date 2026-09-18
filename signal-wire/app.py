@@ -13,8 +13,21 @@ try:
  HAS_FLASK=True
 except ImportError: HAS_FLASK=False
 BASE=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(BASE,'data'); CACHE=os.path.join(DATA,'cache.json'); PORT=int(os.getenv('PORT','5050')); TIMEOUT=14; REFRESH_SECONDS=900
-SOURCES=[('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),('CNBC','Equities','https://www.cnbc.com/id/100003114/device/rss/rss.html'),('Yahoo Finance','Equities','https://finance.yahoo.com/news/rssindex'),('CoinDesk','Crypto','https://www.coindesk.com/arc/outboundfeeds/rss/'),('Cointelegraph','Crypto','https://cointelegraph.com/rss'),('OilPrice','Commodities','https://oilprice.com/rss/main'),('USGS Earthquakes','Natural events','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom')]
+SOURCES=[
+ ('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('BEA','Macro','https://www.bea.gov/news/rss.xml'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),
+ ('CNBC','Equities','https://www.cnbc.com/id/100003114/device/rss/rss.html'),('Yahoo Finance','Equities','https://finance.yahoo.com/news/rssindex'),('CoinDesk','Crypto','https://www.coindesk.com/arc/outboundfeeds/rss/'),('Cointelegraph','Crypto','https://cointelegraph.com/rss'),('OilPrice','Commodities','https://oilprice.com/rss/main'),('USGS Earthquakes','Natural events','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom'),
+ # Official regional central-bank and regulator feeds.
+ ('Bank of Japan','Macro','https://www.boj.or.jp/en/rss/whatsnew.rdf'),('Bank of Canada','Macro','https://www.bankofcanada.ca/feed/'),('Reserve Bank of Australia','Macro','https://www.rba.gov.au/rss/rss-cb.xml'),('Bank of England','Macro','https://www.bankofengland.co.uk/rss/news'),('CFTC','Commodities','https://www.cftc.gov/RSS/PressReleases.xml'),
+]
+# These publisher-labelled feeds use Google News' public RSS index where the publisher does not
+# provide a stable open RSS endpoint. Links remain clickable; verification still requires an
+# independent domain or primary source, and a publisher headline is never treated as proof alone.
+PUBLISHER_QUERIES=[
+ ('Reuters','Business','site:reuters.com business economy markets'),('Bloomberg','Business','site:bloomberg.com markets economy'),('Financial Times','Business','site:ft.com markets economy'),('Wall Street Journal','Business','site:wsj.com markets economy'),('MarketWatch','Equities','site:marketwatch.com stocks economy'),('Investing.com','Equities','site:investing.com news markets'),('AP Business','Business','site:apnews.com business economy'),('BBC Business','Business','site:bbc.com/news/business'),('Trading Economics','Macro','site:tradingeconomics.com news economy markets'),
+]
 GDELT=[('Google News geopolitics','Geopolitics','geopolitics OR conflict OR war'),('Google News trade','Geopolitics','tariff OR sanctions OR trade restriction'),('Google News supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
+JSON_SOURCES=[('IMF DataMapper','Macro','https://www.imf.org/external/datamapper/api/v1/NGDP_RPCH')]
+
 WORLD_MONITOR_API='https://api.worldmonitor.app/api'
 def worldmonitor_items():
  """Fetch optional World Monitor signals without making refresh fragile.
@@ -118,11 +131,32 @@ def merge(items):
   x['level']='High' if x['score']>=65 else 'Medium' if x['score']>=35 else 'Low'
   if x['score']>=35:out.append(x)
  return sorted(out,key=lambda x:(x['score'],x['published']),reverse=True)[:250]
+def fetch_json(url):
+ req=Request(url,headers={'User-Agent':'SignalWire/2.2 research dashboard','Accept':'application/json'})
+ with urlopen(req,timeout=TIMEOUT) as r:return json.loads(r.read().decode('utf8'))
+def json_items(raw,source,category,url):
+ # IMF DataMapper is primary numeric data: create one transparent snapshot item,
+ # never infer a story from a value without corroborating reporting.
+ if not isinstance(raw,dict) or not raw.get('values'): return []
+ values=raw.get('values',{}); latest=[]
+ for country, series in values.items():
+  if isinstance(series,dict) and series:
+   year=max(series, key=lambda x: str(x)); latest.append((country,series[year],year))
+ latest=latest[:12]
+ if not latest:return []
+ summary='IMF DataMapper real GDP growth observations: '+', '.join(f'{c} {v}% ({y})' for c,v,y in latest if isinstance(v,(int,float)))
+ return [item('IMF DataMapper: real GDP growth snapshot',summary,url,now(),source,category)]
 def fetch_all():
- sources=SOURCES+[(n,c,'https://news.google.com/rss/search?q='+quote_plus(q)+'&hl=en-US&gl=US&ceid=US:en') for n,c,q in GDELT]; items=[];health={};errors=[]
+ publisher_sources=[(n,c,'https://news.google.com/rss/search?q='+quote_plus(q)+'&hl=en-US&gl=US&ceid=US:en') for n,c,q in PUBLISHER_QUERIES]
+ sources=SOURCES+publisher_sources+[(n,c,'https://news.google.com/rss/search?q='+quote_plus(q)+'&hl=en-US&gl=US&ceid=US:en') for n,c,q in GDELT]; items=[];health={};errors=[]
  for n,c,u in sources:
   try:
    got=parse(fetch(u),n,c,u);items+=got;health[n]={'ok':True,'count':len(got),'url':u}
+  except Exception as e:
+   health[n]={'ok':False,'count':0,'url':u,'error':str(e)[:160]};errors.append(n+': '+str(e)[:120])
+ for n,c,u in JSON_SOURCES:
+  try:
+   got=json_items(fetch_json(u),n,c,u);items+=got;health[n]={'ok':True,'count':len(got),'url':u}
   except Exception as e:
    health[n]={'ok':False,'count':0,'url':u,'error':str(e)[:160]};errors.append(n+': '+str(e)[:120])
  wm_items,wm_health,wm_errors=worldmonitor_items();items+=wm_items;health.update(wm_health);errors.extend(wm_errors)
