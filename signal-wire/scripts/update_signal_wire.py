@@ -8,7 +8,10 @@ sys.path.insert(0,ROOT)
 import app
 items, health, errors = app.fetch_all()
 payload={"items":items,"last_refresh":datetime.now(timezone.utc).isoformat(),"source_health":health,"errors":errors}
-knowledge=app.build_knowledge(items, {})
+try:
+    with open(os.path.join(DOCS,"data.json"),encoding="utf8") as f: previous_knowledge=json.load(f).get('knowledge',{}).get('entries',{})
+except Exception: previous_knowledge={}
+knowledge=app.build_knowledge(items, previous_knowledge)
 payload['knowledge']=knowledge
 for target in (os.path.join(DOCS,"knowledge.json"), os.path.join(ROOT,"knowledge.json"), os.path.join(os.path.dirname(ROOT),"knowledge.json")):
     try:
