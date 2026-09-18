@@ -70,7 +70,7 @@ function openDetail(id){
   $('#closeDetail')?.focus();
 }
 async function fetchSnapshot(){
-  const urls=['/api/data?ts='+Date.now(),`data.json?ts=${Date.now()}`,'/api/items?ts='+Date.now()];let last;
+  const workerHost=location.hostname==='maxis-ai-agency.maxiwalker0707.workers.dev';const urls=workerHost?[`data.json?ts=${Date.now()}`,'/api/data?ts='+Date.now(),'/api/items?ts='+Date.now()]:['/api/data?ts='+Date.now(),`data.json?ts=${Date.now()}`,'/api/items?ts='+Date.now()];let last;
   for(const url of urls){try{const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error(`published data returned ${r.status}`);const d=await r.json();if(Array.isArray(d.items))return d;}catch(e){last=e;}}
   throw last||Error('No data endpoint responded');
 }
@@ -87,7 +87,7 @@ function setAi(open){const panel=$('#aiPanel'),scrim=$('#aiScrim'),toggle=$('#ai
 function addMsg(role,text){const log=$('#chatLog');if(!log)return null;const el=document.createElement('div');el.className=`chat-msg ${role}`;el.textContent=text;log.appendChild(el);log.scrollTop=log.scrollHeight;return el;}
 const PUBLIC_AI='https://signal-wire-ai.maxiwalker0707.workers.dev';
 async function askAI(body){
-  const saved=localStorage.getItem('sw-ai-endpoint')||'';const candidates=unique([saved,location.origin+'/api/chat',PUBLIC_AI]);let last;
+  const saved=localStorage.getItem('sw-ai-endpoint')||'';const workerHost=location.hostname==='maxis-ai-agency.maxiwalker0707.workers.dev';const candidates=unique([saved,...(workerHost?[]:[location.origin+'/api/chat']),PUBLIC_AI]);let last;
   for(const endpoint of candidates){try{const r=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!r.ok)throw Error(`backend returned ${r.status}`);const d=await r.json();if(d.reply)return d;last=Error(d.error||'No answer returned');}catch(e){last=e;}}
   throw last||Error('No AI endpoint responded');
 }
