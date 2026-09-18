@@ -14,10 +14,10 @@ try:
 except ImportError: HAS_FLASK=False
 BASE=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(BASE,'data'); CACHE=os.path.join(DATA,'cache.json'); PORT=int(os.getenv('PORT','5050')); TIMEOUT=14; REFRESH_SECONDS=900
 SOURCES=[
- ('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('BEA','Macro','https://www.bea.gov/news/rss.xml'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),
+ ('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('BEA','Macro','https://apps.bea.gov/rss/rss.xml'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),
  ('CNBC','Equities','https://www.cnbc.com/id/100003114/device/rss/rss.html'),('Yahoo Finance','Equities','https://finance.yahoo.com/news/rssindex'),('CoinDesk','Crypto','https://www.coindesk.com/arc/outboundfeeds/rss/'),('Cointelegraph','Crypto','https://cointelegraph.com/rss'),('OilPrice','Commodities','https://oilprice.com/rss/main'),('USGS Earthquakes','Natural events','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom'),
  # Official regional central-bank and regulator feeds.
- ('Bank of Japan','Macro','https://www.boj.or.jp/en/rss/whatsnew.rdf'),('Bank of Canada','Macro','https://www.bankofcanada.ca/feed/'),('Reserve Bank of Australia','Macro','https://www.rba.gov.au/rss/rss-cb.xml'),('Bank of England','Macro','https://www.bankofengland.co.uk/rss/news'),('CFTC','Commodities','https://www.cftc.gov/RSS/PressReleases.xml'),
+ ('Bank of Japan','Macro','https://www.boj.or.jp/en/rss/whatsnew.xml'),('Bank of Canada','Macro','https://www.bankofcanada.ca/feed/'),('Reserve Bank of Australia','Macro','https://www.rba.gov.au/rss/rss-cb-speeches.xml'),('Bank of England','Macro','https://www.bankofengland.co.uk/rss/news'),('CFTC','Commodities','https://www.cftc.gov/RSS/RSSGP/rssgp.xml'),
 ]
 # These publisher-labelled feeds use Google News' public RSS index where the publisher does not
 # provide a stable open RSS endpoint. Links remain clickable; verification still requires an
