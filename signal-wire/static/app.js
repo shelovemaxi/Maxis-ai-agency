@@ -6,6 +6,7 @@ const setText=(sel,value)=>{const el=$(sel);if(el)el.textContent=String(value??'
 const safeUrl=u=>/^https?:\/\//i.test(String(u||''))?String(u):'#';
 const fmtTime=v=>{const d=new Date(v);if(!Number.isFinite(d.getTime()))return'Unknown time';return d.toLocaleString(undefined,{day:'2-digit',month:'short',year:'numeric',hour:'numeric',minute:'2-digit',hour12:true})};
 const ago=v=>{const d=new Date(v),ms=Date.now()-d.getTime();if(!Number.isFinite(ms)||ms<0)return'just now';const m=Math.floor(ms/60000);return m<1?'just now':m<60?`${m}m ago`:m<1440?`${Math.floor(m/60)}h ago`:fmtTime(v)};
+const DEFAULT_THRESHOLD=50;
 const state={all:[],knowledge:{entries:[]},source:'all',loaded:false};
 const threshold=$('#threshold'),category=$('#category'),verification=$('#verification'),source=$('#source'),detail=$('#detail');
 const unique=a=>[...new Set((a||[]).filter(Boolean))];
@@ -16,7 +17,7 @@ const independentlyChecked=x=>evidenceCode(x)!=='single-source'&&domainCount(x)>
 const tierName=x=>({official:'Official', 'major-financial':'Major financial', specialist:'Specialist', discovery:'Discovery'}[x?.source_tier]||'Discovery');
 const confidenceName=x=>({high:'High confidence',medium:'Medium confidence',low:'Low confidence'}[x?.confidence]||'Unstated confidence');
 const statusName=x=>x?.verification_label||(evidenceCode(x)==='confirmed'?'Confirmed official data':independentlyChecked(x)?'Corroborated across 2+ domains':'Reported lead — verify carefully');
-const filtered=()=>state.all.filter(x=>Number(x?.score||0)>=Number(threshold?.value||35)&&(category?.value==='all'||x.category===category.value)&&(verification?.value==='all'||evidenceCode(x)===verification.value)&&(source?.value==='all'||sourceRows(x).some(s=>s.name===source.value)));
+const filtered=()=>state.all.filter(x=>Number(x?.score||0)>=Number(threshold?.value||DEFAULT_THRESHOLD)&&(category?.value==='all'||x.category===category.value)&&(verification?.value==='all'||evidenceCode(x)===verification.value)&&(source?.value==='all'||sourceRows(x).some(s=>s.name===source.value)));
 function sourceOptions(){
   if(!source)return;
   const current=state.source||source.value||'all';
@@ -49,7 +50,7 @@ function render(){
   const rows=filtered();renderPulse(rows);setText('#total',rows.length);setText('#verifiedCount',rows.filter(independentlyChecked).length);
   const cards=$('#cards');if(cards)cards.innerHTML=rows.length?rows.map(card).join(''):'<div class="loading">No material signals match these filters. Try lowering the score or clearing a filter.</div>';
   const count=state.knowledge?.entries?.length||0;setText('#knowledgeCount',`${count} learned pattern${count===1?'':'s'}`);setText('#knowledgeSummary',count?`${count} evidence-backed patterns retained from official or independently corroborated events.`:'No verified patterns have been retained yet.');
-  try{localStorage.setItem('sw-filter',JSON.stringify({t:threshold?.value||35,c:category?.value||'all',v:verification?.value||'all',s:source?.value||'all'}));}catch{}
+  try{localStorage.setItem('sw-filter-v2',JSON.stringify({t:threshold?.value||35,c:category?.value||'all',v:verification?.value||'all',s:source?.value||'all'}));}catch{}
 }
 function openDetail(id){
   const x=state.all.find(v=>String(v.id)===String(id));if(!x||!detail)return;
@@ -82,7 +83,7 @@ async function load(){
     render();
   }catch(e){const error=$('#error');if(error){error.textContent='Could not load published intelligence data. The last good view is preserved if available. '+e.message;error.classList.remove('hidden');}if(!state.loaded){setText('#pulseTitle','Signal Wire is waiting for data');setText('#pulseText','The feed is temporarily unavailable. Try Reload data in a moment.');setText('#cards','Data unavailable');}}
 }
-function setAi(open){const panel=$('#aiPanel'),scrim=$('#aiScrim'),toggle=$('#aiToggle');if(!panel)return;panel.classList.toggle('closed',!open);panel.setAttribute('aria-hidden',String(!open));if(scrim){scrim.hidden=!open;scrim.classList.toggle('visible',open);}toggle?.setAttribute('aria-expanded',String(open));document.body.classList.toggle('ai-open',open);if(open)setTimeout(()=>$('#chatInput')?.focus(),180);}
+function setAi(open){const panel=$('#aiPanel'),scrim=$('#aiScrim'),toggle=$('#aiToggle');if(!panel)return;panel.classList.toggle('closed',!open);panel.setAttribute('aria-hidden',String(!open));if(scrim){scrim.hidden=!open;scrim.classList.toggle('visible',open);}toggle?.setAttribute('aria-expanded',String(open));$('#aiDockButton')?.setAttribute('aria-expanded',String(open));document.body.classList.toggle('ai-open',open);if(open)setTimeout(()=>$('#chatInput')?.focus(),180);}
 function addMsg(role,text){const log=$('#chatLog');if(!log)return null;const el=document.createElement('div');el.className=`chat-msg ${role}`;el.textContent=text;log.appendChild(el);log.scrollTop=log.scrollHeight;return el;}
 const PUBLIC_AI='https://signal-wire-ai.maxiwalker0707.workers.dev';
 async function askAI(body){
@@ -91,14 +92,14 @@ async function askAI(body){
   throw last||Error('No AI endpoint responded');
 }
 function setup(){
-  try{const p=JSON.parse(localStorage.getItem('sw-filter')||'null');if(p){if(threshold)threshold.value=p.t||35;if(category)category.value=p.c||'all';if(verification)verification.value=p.v||'all';state.source=p.s||'all';}}catch{}
+  try{const p=JSON.parse(localStorage.getItem('sw-filter-v2')||'null');if(p){if(threshold)threshold.value=p.t||DEFAULT_THRESHOLD;if(category)category.value=p.c||'all';if(verification)verification.value=p.v||'all';state.source=p.s||'all';}}catch{}
   if(threshold){setText('#thresholdValue',threshold.value);threshold.addEventListener('input',()=>{setText('#thresholdValue',threshold.value);render();});}
   [category,verification,source].forEach(e=>e?.addEventListener('change',()=>{if(e===source)state.source=source.value;render();}));
   $('#cards')?.addEventListener('click',e=>{const c=e.target.closest('.card');if(c)openDetail(c.dataset.id);});
   $('#cards')?.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.closest('.card')){e.preventDefault();openDetail(e.target.closest('.card').dataset.id);}});
   $('#closeDetail')?.addEventListener('click',()=>detail?.close?.());detail?.addEventListener('click',e=>{if(e.target===detail)detail.close?.();});
   $('#method')?.addEventListener('click',()=>{const el=$('#methodology'),hidden=el?.classList.toggle('hidden');$('#method')?.setAttribute('aria-expanded',String(!hidden));});
-  $('#refresh')?.addEventListener('click',load);$('#aiToggle')?.addEventListener('click',()=>setAi(true));$('#aiClose')?.addEventListener('click',()=>setAi(false));$('#aiScrim')?.addEventListener('click',()=>setAi(false));document.addEventListener('keydown',e=>{if(e.key==='Escape'){setAi(false);if(detail?.open)detail.close();}});
+  $('#refresh')?.addEventListener('click',load);$('#aiToggle')?.addEventListener('click',()=>setAi(true));$('#aiDockButton')?.addEventListener('click',()=>setAi(true));$('#aiClose')?.addEventListener('click',()=>setAi(false));$('#aiScrim')?.addEventListener('click',()=>setAi(false));document.addEventListener('keydown',e=>{if(e.key==='Escape'){setAi(false);if(detail?.open)detail.close();}});
   const endpoint=$('#aiEndpoint'),status=$('#aiStatus'),saved=localStorage.getItem('sw-ai-endpoint')||'';if(endpoint)endpoint.value=saved;if(saved&&status)status.textContent='Using the private endpoint saved in this browser; public fallback remains available.';
   $('#saveEndpoint')?.addEventListener('click',()=>{const v=endpoint?.value.trim()||'';if(v&&!/^https:\/\//i.test(v)){if(status)status.textContent='Use an https:// URL, or leave this empty for the public analyst.';return;}if(v)localStorage.setItem('sw-ai-endpoint',v);else localStorage.removeItem('sw-ai-endpoint');if(status)status.textContent=v?'Private endpoint saved; public fallback remains available.':'Public analyst ready.';});
   $('#aiClear')?.addEventListener('click',()=>{const log=$('#chatLog');if(log)log.innerHTML='<div class="chat-msg assistant">Chat cleared. Ask about the strongest evidence or a market connection.</div>';});

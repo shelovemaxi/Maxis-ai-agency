@@ -8,7 +8,7 @@ from email.utils import parsedate_to_datetime
 from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
-from analysis import analyse, similar, event_key
+from analysis import analyse, similar, event_key, why_it_matters_for
 try:
     from flask import Flask, jsonify, render_template
     HAS_FLASK = True
@@ -258,6 +258,7 @@ def merge(items):
         if any(k in text for k in ('bank', 'credit', 'default', 'loan')): links += ['credit conditions → banks', 'credit conditions → cyclical equities']
         if any(k in text for k in ('chip', 'semiconductor', 'technology')): links += ['component supply → technology and manufacturing']
         event['connections'] = list(dict.fromkeys(links))[:4]
+        event['why_it_matters'] = why_it_matters_for(text, int(event.get('score', 0)))
         event['level'] = 'High' if event.get('score', 0) >= 65 else 'Medium' if event.get('score', 0) >= RELEVANCE_THRESHOLD else 'Low'
         event['freshness'] = freshness(event.get('published'))
         event['confirmed_facts'] = event.get('summary', '')

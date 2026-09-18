@@ -16,6 +16,25 @@ MARKET_TERMS={
 NOISE_TERMS={'sponsored':18,'opinion':10,'podcast':8,'recipe':15,'quiz':12,'how to':8,'video':3,'slideshow':8}
 TIER_WEIGHT={'official':20,'major-financial':12,'specialist':6,'discovery':0}
 
+def why_it_matters_for(text: str, score: int = 0) -> str:
+    """Use a concrete transmission path instead of a generic market disclaimer."""
+    t = (text or '').lower()
+    if any(k in t for k in ('rate decision', 'interest rate', 'central bank', 'inflation', 'cpi', 'payroll', 'jobs', 'gdp', 'yield', 'treasury')):
+        return 'Could shift rate expectations, with spillovers to government bonds, currencies, and rate-sensitive equities.'
+    if any(k in t for k in ('oil', 'gas', 'opec', 'energy', 'supply disruption', 'shipping')):
+        return 'Could change energy prices and inflation expectations, affecting producers, transport, consumers, and policy expectations.'
+    if any(k in t for k in ('tariff', 'sanction', 'trade', 'export', 'import', 'supply chain')):
+        return 'Could alter input costs, trade volumes, currencies, and the outlook for exposed exporters or manufacturers.'
+    if any(k in t for k in ('bank', 'credit', 'default', 'loan', 'lending')):
+        return 'Could affect funding conditions, bank risk, credit spreads, and companies dependent on financing.'
+    if any(k in t for k in ('chip', 'semiconductor', 'technology')):
+        return 'Could affect component availability, technology margins, manufacturing capacity, and supplier demand.'
+    if any(k in t for k in ('crypto', 'bitcoin', 'ethereum', 'token')):
+        return 'Could influence digital-asset risk appetite, liquidity, and related listed companies.'
+    if any(k in t for k in ('company', 'earnings', 'profit', 'revenue', 'shares', 'stock')):
+        return 'Could change earnings or cash-flow expectations for the company and its sector, subject to confirmation.'
+    return 'Prioritized because the available evidence suggests a potentially material change in a market, company, or economic narrative.'
+
 def rule_analysis(title: str, summary: str, category: str, source_tier: str='discovery')->dict:
     text=(title+' '+summary).lower(); hits=[]; raw_signal=0; noise=0
     for term,weight in MARKET_TERMS.items():
@@ -45,7 +64,7 @@ def rule_analysis(title: str, summary: str, category: str, source_tier: str='dis
         'reasons':hits[:8],
         'summary':summary[:420] or title,
         'market_relevance':relevance,
-        'why_it_matters':('Could transmit through '+('macro markets' if score>=65 else 'a sector or asset group')+'; this is analysis, not a confirmed price effect.'),
+        'why_it_matters':why_it_matters_for(text, score),
         'affected_assets':list(dict.fromkeys(assets))[:5],
         'confidence':'medium' if source_tier=='official' or score>=65 else 'low',
         'analysis_provider':'rules'

@@ -40,7 +40,7 @@
     </section>
 
     <section class="controls" aria-label="Filters">
-      <label>Minimum score <strong id="thresholdValue">35</strong><input id="threshold" type="range" min="35" max="90" value="35"></label>
+      <label>Minimum score <strong id="thresholdValue">50</strong><input id="threshold" type="range" min="35" max="90" value="50"></label>
       <select id="category" aria-label="Category"><option value="all">All categories</option><option>Macro</option><option>Geopolitics</option><option>Commodities</option><option>Equities</option><option>Crypto</option><option>Natural events</option></select>
       <select id="verification" aria-label="Verification"><option value="all">All evidence levels</option><option value="confirmed">Confirmed official data</option><option value="verified">2+ source checked</option><option value="single-source">Single-source lead</option></select>
       <select id="source" aria-label="Source"><option value="all">All sources</option></select>
@@ -49,7 +49,7 @@
 
     <section id="methodology" class="method hidden">
       <h2>How Signal Wire decides what to show</h2>
-      <p><b>Source priority:</b> official data and filings first, then major financial reporting, specialist coverage, and discovery leads. A discovery lead cannot become confirmed by itself.</p>
+      <p><b>Source priority:</b> three verification tiers are used: official data and filings first, then major financial reporting, then specialist coverage. Discovery leads sit outside those tiers and cannot become confirmed by themselves.</p>
       <p><b>Relevance score:</b> a 0–100 prioritisation measure combining market breadth, event magnitude, urgency, source priority, cross-source support, and a noise penalty. It is not a price forecast.</p>
       <p><b>Verification:</b> “confirmed” means a primary source supports the factual claim; “2+ source checked” means distinct sources agree on the underlying event. Market connections are analysis, not guaranteed causation.</p>
     </section>
@@ -63,6 +63,7 @@
   </main>
 
   <div id="aiScrim" class="ai-scrim" hidden></div>
+  <button id="aiDockButton" class="ai-dock" type="button" aria-label="Open Signal Wire AI analyst" aria-controls="aiPanel">AI Analyst <span aria-hidden="true">↗</span></button>
   <aside id="aiPanel" class="ai-panel closed" aria-labelledby="aiTitle" aria-hidden="true">
     <div class="ai-head">
       <div><span class="eyebrow">EVIDENCE-AWARE ANALYST</span><h2 id="aiTitle">Signal Wire AI</h2><p>Short answers grounded in the events currently on screen.</p></div>
