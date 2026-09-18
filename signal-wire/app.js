@@ -70,7 +70,7 @@ function openDetail(id){
   $('#closeDetail')?.focus();
 }
 async function fetchSnapshot(){
-  const urls=[`data.json?ts=${Date.now()}`,'/api/items?ts='+Date.now()];let last;
+  const urls=['/api/data?ts='+Date.now(),`data.json?ts=${Date.now()}`,'/api/items?ts='+Date.now()];let last;
   for(const url of urls){try{const r=await fetch(url,{cache:'no-store'});if(!r.ok)throw Error(`published data returned ${r.status}`);const d=await r.json();if(Array.isArray(d.items))return d;}catch(e){last=e;}}
   throw last||Error('No data endpoint responded');
 }
