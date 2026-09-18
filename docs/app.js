@@ -22,7 +22,7 @@ $('#closeDetail').onclick=()=>detail.close();detail.addEventListener('click',e=>
 $('#method').onclick=()=>{const hidden=$('#methodology').classList.toggle('hidden');$('#method').setAttribute('aria-expanded',String(!hidden))};
 $('#refresh').onclick=load;setInterval(load,900000);load();
 const chatLog=$('#chatLog'),chatForm=$('#chatForm'),chatInput=$('#chatInput'),aiEndpoint=$('#aiEndpoint'),aiStatus=$('#aiStatus');
-const autoEndpoint=location.hostname.endsWith('workers.dev')?location.origin:'https://signal-wire-ai.maxiwalker0707.workers.dev';
+const autoEndpoint=location.hostname==='signal-wire-ai.maxiwalker0707.workers.dev'?'https://signal-wire-ai.maxiwalker0707.workers.dev':'https://signal-wire-ai.maxiwalker0707.workers.dev';
 aiEndpoint.value=localStorage.getItem('sw-ai-endpoint')||autoEndpoint;
 aiStatus.textContent='AI endpoint ready. Your key stays server-side.';
 function addMsg(role,text){const el=document.createElement('div');el.className='chat-msg '+role;el.textContent=text;chatLog.appendChild(el);chatLog.scrollTop=chatLog.scrollHeight;return el}
