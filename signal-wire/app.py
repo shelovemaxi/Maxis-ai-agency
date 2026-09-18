@@ -1,140 +1,334 @@
 #!/usr/bin/env python3
-"""Signal Wire collector, verification pipeline, JSON API, and local UI host."""
+"""Signal Wire's resilient, source-tiered public-feed research pipeline."""
 from __future__ import annotations
-import json,os,re,time,html,hashlib,threading
-from datetime import datetime,timezone
+import hashlib, html, json, os, re, threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
-from urllib.parse import quote_plus
-from urllib.request import Request,urlopen
+from urllib.parse import parse_qsl, quote_plus, urlencode, urlsplit, urlunsplit
+from urllib.request import Request, urlopen
 import xml.etree.ElementTree as ET
-from analysis import analyse, similar
+from analysis import analyse, similar, event_key
 try:
- from flask import Flask,jsonify,render_template
- HAS_FLASK=True
-except ImportError: HAS_FLASK=False
-BASE=os.path.dirname(os.path.abspath(__file__)); DATA=os.path.join(BASE,'data'); CACHE=os.path.join(DATA,'cache.json'); KNOWLEDGE=os.path.join(DATA,'knowledge.json'); PORT=int(os.getenv('PORT','5050')); TIMEOUT=14; REFRESH_SECONDS=900
-SOURCES=[('Federal Reserve','Macro','https://www.federalreserve.gov/feeds/press_all.xml'),('ECB','Macro','https://www.ecb.europa.eu/rss/press.html'),('BLS','Macro','https://www.bls.gov/feed/bls_latest.rss'),('SEC','Equities','https://www.sec.gov/news/pressreleases.rss'),('CNBC','Equities','https://www.cnbc.com/id/100003114/device/rss/rss.html'),('Yahoo Finance','Equities','https://finance.yahoo.com/news/rssindex'),('CoinDesk','Crypto','https://www.coindesk.com/arc/outboundfeeds/rss/'),('Cointelegraph','Crypto','https://cointelegraph.com/rss'),('OilPrice','Commodities','https://oilprice.com/rss/main'),('USGS Earthquakes','Natural events','https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom')]
-GDELT=[('GDELT geopolitics','Geopolitics','geopolitics OR conflict OR war'),('GDELT trade','Geopolitics','tariff OR sanctions OR trade restriction'),('GDELT supply','Commodities','oil OR gas OR OPEC OR supply disruption')]
-state={'items':[],'last_refresh':None,'source_health':{},'errors':[],'refreshing':False}; lock=threading.Lock()
-def now():return datetime.now(timezone.utc).isoformat()
-def clean(s):return re.sub(r'\s+',' ',html.unescape(re.sub(r'<[^>]+>',' ',s or ''))).strip()
-def domain(url):
- m=re.search(r'https?://([^/]+)',url or '');return re.sub(r'^www\.','',m.group(1).lower()) if m else 'unknown'
-def date(s):
- try:d=parsedate_to_datetime(s)
- except Exception:
-  try:d=datetime.fromisoformat((s or '').replace('Z','+00:00'))
-  except Exception:return now()
- return (d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)).isoformat()
-def child(el,names):
- for c in list(el):
-  if c.tag.split('}')[-1].lower() in names:return ''.join(c.itertext()).strip()
- return ''
-def tier_for(source, url):
- name=(source+' '+url).lower()
- if any(x in name for x in ('federal reserve','ecb','bank of','bls','bea','sec','imf','usgs','statistics')): return 'official'
- if any(x in name for x in ('reuters','bloomberg','financial times','wall street journal','cnbc','marketwatch','yahoo','associated press','bbc')): return 'major-financial'
- if any(x in name for x in ('investing','trading economics','coindesk','cointelegraph','oilprice')): return 'specialist'
- return 'discovery'
+    from flask import Flask, jsonify, render_template
+    HAS_FLASK = True
+except ImportError:
+    HAS_FLASK = False
 
-def item(title,summary,url,published,source,category):
- a=analyse(title,summary,category)
- t=tier_for(source,url); ts=date(published)
- return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'excerpt':clean(summary)[:480],'url':url,'source':source,'domain':domain(url),'category':category,'published':ts,'timestamp_type':'published','source_tier':t,'score':a['score'],'score_breakdown':a.get('score_breakdown',{}),'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'confidence':a.get('confidence','medium'),'why_it_matters':a.get('why_it_matters',a['market_relevance']),'sources':[{'name':source,'domain':domain(url),'url':url,'title':title,'published':ts,'timestamp_type':'published','tier':t,'excerpt':clean(summary)[:480]}],'verification':'single-source','corroboration':1,'connections':[]}
-def parse(raw,source,category,fallback):
- root=ET.fromstring(raw); out=[]
- for n in [e for e in root.iter() if e.tag.split('}')[-1].lower() in ('item','entry')][:60]:
-  title=clean(child(n,{'title'})); link=child(n,{'link'})
-  for c in list(n):
-   if c.tag.split('}')[-1].lower()=='link' and c.attrib.get('href'):link=c.attrib['href'];break
-  if title:out.append(item(title,clean(child(n,{'description','summary','content','encoded'})),link or fallback,child(n,{'pubdate','published','updated','date'}),source,category))
- return out
+BASE = os.path.dirname(os.path.abspath(__file__))
+DATA = os.path.join(BASE, 'data')
+CACHE = os.path.join(DATA, 'cache.json')
+KNOWLEDGE = os.path.join(DATA, 'knowledge.json')
+PORT = int(os.getenv('PORT', '5050'))
+TIMEOUT = 12
+MAX_PER_SOURCE = 45
+RELEVANCE_THRESHOLD = 35
+
+# Public feeds only. A failed optional feed is logged in source_health and never
+# stops the other sources. The explicit tier is more trustworthy than guessing
+# from a publisher name later in the pipeline.
+def feed(name, category, url, tier):
+    return {'name': name, 'category': category, 'url': url, 'tier': tier, 'access': 'public RSS/Atom'}
+
+SOURCES = [
+    # Tier 1: official / primary data and releases
+    feed('Federal Reserve', 'Macro', 'https://www.federalreserve.gov/feeds/press_all.xml', 'official'),
+    feed('FRED', 'Macro', 'https://fred.stlouisfed.org/feeds/series/DFII10', 'official'),
+    feed('BLS', 'Macro', 'https://www.bls.gov/feed/bls_latest.rss', 'official'),
+    feed('BEA', 'Macro', 'https://www.bea.gov/news/rss.xml', 'official'),
+    feed('Census Bureau', 'Macro', 'https://www.census.gov/newsroom/press-releases.rss', 'official'),
+    feed('SEC / EDGAR', 'Equities', 'https://www.sec.gov/news/pressreleases.rss', 'official'),
+    feed('US Treasury', 'Macro', 'https://home.treasury.gov/rss/press-releases.xml', 'official'),
+    feed('CFTC', 'Commodities', 'https://www.cftc.gov/RSS/PressReleases.xml', 'official'),
+    feed('New York Fed', 'Macro', 'https://www.newyorkfed.org/rss/research.xml', 'official'),
+    feed('Atlanta Fed', 'Macro', 'https://www.atlantafed.org/rss', 'official'),
+    feed('Dallas Fed', 'Macro', 'https://www.dallasfed.org/rss', 'official'),
+    feed('ECB', 'Macro', 'https://www.ecb.europa.eu/rss/press.html', 'official'),
+    feed('Bank of England', 'Macro', 'https://www.bankofengland.co.uk/rss/news', 'official'),
+    feed('Bank of Japan', 'Macro', 'https://www.boj.or.jp/en/rss/whatsnew.xml', 'official'),
+    feed('Reserve Bank of Australia', 'Macro', 'https://www.rba.gov.au/rss/rss-cb-media-releases.xml', 'official'),
+    feed('Reserve Bank of New Zealand', 'Macro', 'https://www.rbnz.govt.nz/rss', 'official'),
+    feed('Bank of Canada', 'Macro', 'https://www.bankofcanada.ca/feed/press-releases/', 'official'),
+    feed('Swiss National Bank', 'Macro', 'https://www.snb.ch/en/rss/press_releases', 'official'),
+    feed('Norges Bank', 'Macro', 'https://www.norges-bank.no/en/rss/', 'official'),
+    feed('BIS', 'Macro', 'https://www.bis.org/doclist/all.rss', 'official'),
+    feed('IMF', 'Macro', 'https://www.imf.org/en/News/RSS', 'official'),
+    feed('EIA', 'Commodities', 'https://www.eia.gov/rss/news.xml', 'official'),
+    # Tier 2: major financial and business reporting
+    feed('Reuters', 'Macro', 'https://feeds.reuters.com/reuters/businessNews', 'major-financial'),
+    feed('CNBC', 'Equities', 'https://www.cnbc.com/id/100003114/device/rss/rss.html', 'major-financial'),
+    feed('Bloomberg Markets', 'Macro', 'https://feeds.bloomberg.com/markets/news.rss', 'major-financial'),
+    feed('Financial Times', 'Macro', 'https://www.ft.com/?format=rss', 'major-financial'),
+    feed('Wall Street Journal', 'Equities', 'https://feeds.a.dj.com/rss/RSSMarketsMain.xml', 'major-financial'),
+    feed('MarketWatch', 'Equities', 'https://feeds.marketwatch.com/marketwatch/topstories/', 'major-financial'),
+    feed('Yahoo Finance', 'Equities', 'https://finance.yahoo.com/news/rssindex', 'major-financial'),
+    feed('Business Insider', 'Equities', 'https://www.businessinsider.com/rss', 'major-financial'),
+    feed('Forbes', 'Equities', 'https://www.forbes.com/business/feed/', 'major-financial'),
+    feed('Fortune', 'Equities', 'https://fortune.com/feed/fortune-feeds/', 'major-financial'),
+    feed('Investopedia', 'Macro', 'https://www.investopedia.com/feedbuilder/feed/getfeed?feedName=rss_articles', 'major-financial'),
+    feed('Nasdaq', 'Equities', 'https://www.nasdaq.com/feed/rssoutbound?category=Markets', 'major-financial'),
+    feed('BBC Business', 'Macro', 'https://feeds.bbci.co.uk/news/business/rss.xml', 'major-financial'),
+    # Tier 3: specialist and discovery leads; never sufficient alone for a hard fact
+    feed('Investing.com Markets', 'Macro', 'https://www.investing.com/rss/news_25.rss', 'specialist'),
+    feed('Investing.com Commodities', 'Commodities', 'https://www.investing.com/rss/news_14.rss', 'specialist'),
+    feed('Investing.com Economy', 'Macro', 'https://www.investing.com/rss/news_301.rss', 'specialist'),
+    feed('Seeking Alpha', 'Equities', 'https://seekingalpha.com/feed.xml', 'specialist'),
+    feed('Benzinga', 'Equities', 'https://www.benzinga.com/feed', 'specialist'),
+    feed('CoinDesk', 'Crypto', 'https://www.coindesk.com/arc/outboundfeeds/rss/', 'specialist'),
+    feed('Cointelegraph', 'Crypto', 'https://cointelegraph.com/rss', 'specialist'),
+    feed('Cboe', 'Equities', 'https://www.cboe.com/rss/news/', 'specialist'),
+    feed('Barrons', 'Equities', 'https://feeds.a.dj.com/rss/RSSBarrons.xml', 'specialist'),
+    feed('Investor’s Business Daily', 'Equities', 'https://www.investors.com/feed/', 'specialist'),
+    feed('OilPrice', 'Commodities', 'https://oilprice.com/rss/main', 'specialist'),
+    feed('Eulerpool', 'Macro', 'https://eulerpool.com/en/rss', 'specialist'),
+    feed('USGS Earthquakes', 'Natural events', 'https://earthquake.usgs.gov/earthquakes/feed/v1.0/summary/2.5_day.atom', 'discovery'),
+]
+GDELT = [
+    ('GDELT geopolitics', 'Geopolitics', 'geopolitics OR conflict OR war'),
+    ('GDELT trade', 'Geopolitics', 'tariff OR sanctions OR trade restriction'),
+    ('GDELT supply', 'Commodities', 'oil OR gas OR OPEC OR supply disruption'),
+]
+state = {'items': [], 'last_refresh': None, 'source_health': {}, 'errors': [], 'refreshing': False}
+lock = threading.Lock()
+
+def now():
+    return datetime.now(timezone.utc).isoformat()
+
+def clean(value):
+    return re.sub(r'\s+', ' ', html.unescape(re.sub(r'<[^>]+>', ' ', value or ''))).strip()
+
+def domain(url):
+    try:
+        host = urlsplit(url or '').netloc.lower()
+        return re.sub(r'^www\.', '', host) or 'unknown'
+    except Exception:
+        return 'unknown'
+
+def canonical_url(url):
+    try:
+        p = urlsplit(url or '')
+        keep = [(k, v) for k, v in parse_qsl(p.query, keep_blank_values=True) if not k.lower().startswith(('utm_', 'ref', 'output'))]
+        return urlunsplit((p.scheme.lower(), p.netloc.lower(), p.path.rstrip('/'), urlencode(keep), ''))
+    except Exception:
+        return url or ''
+
+def parsed_date(value, fallback=None):
+    raw = (value or '').strip()
+    if raw:
+        try:
+            d = parsedate_to_datetime(raw)
+        except Exception:
+            try:
+                d = datetime.fromisoformat(raw.replace('Z', '+00:00'))
+            except Exception:
+                d = None
+        if d:
+            d = d.replace(tzinfo=timezone.utc) if d.tzinfo is None else d.astimezone(timezone.utc)
+            return d.isoformat(), 'published'
+    return (fallback or now()), 'retrieved'
+
+def child(element, names):
+    wanted = {n.lower() for n in names}
+    for c in list(element):
+        if c.tag.split('}')[-1].lower() in wanted:
+            return ''.join(c.itertext()).strip()
+    return ''
+
+def parse(raw, spec, fallback):
+    root = ET.fromstring(raw)
+    output = []
+    nodes = [e for e in root.iter() if e.tag.split('}')[-1].lower() in ('item', 'entry')][:MAX_PER_SOURCE]
+    for node in nodes:
+        title = clean(child(node, {'title'}))
+        link = child(node, {'link'})
+        for c in list(node):
+            if c.tag.split('}')[-1].lower() == 'link' and c.attrib.get('href'):
+                link = c.attrib['href']
+                break
+        if not title:
+            continue
+        excerpt = clean(child(node, {'description', 'summary', 'content', 'encoded'}))[:700]
+        published, stamp_type = parsed_date(child(node, {'pubdate', 'published', 'updated', 'date'}))
+        url = link or fallback
+        tier = spec['tier']
+        base = analyse(title, excerpt, spec['category'], tier)
+        source_record = {'name': spec['name'], 'domain': domain(url), 'url': url, 'title': title, 'published': published, 'timestamp_type': stamp_type, 'tier': tier, 'excerpt': excerpt, 'source_family': spec['name'].lower()}
+        output.append({
+            'id': hashlib.sha1((title + canonical_url(url)).encode()).hexdigest()[:16],
+            'title': title, 'summary': base['summary'], 'excerpt': excerpt, 'url': url,
+            'source': spec['name'], 'domain': domain(url), 'category': spec['category'],
+            'published': published, 'timestamp_type': stamp_type, 'source_tier': tier,
+            'score': base['score'], 'score_breakdown': base.get('score_breakdown', {}),
+            'reasons': base['reasons'], 'market_relevance': base['market_relevance'],
+            'analysis_provider': base['analysis_provider'], 'affected_assets': base.get('affected_assets', []),
+            'confidence': base.get('confidence', 'low'), 'why_it_matters': base.get('why_it_matters', base['market_relevance']),
+            'sources': [source_record], 'verification': 'single-source', 'corroboration': 1,
+            'connections': [], 'event_status': 'unverified', 'speculation': 'Market transmission is analytical, not confirmed causation.'
+        })
+    return output
+
 def fetch(url):
- req=Request(url,headers={'User-Agent':'SignalWire/2.0 research dashboard','Accept':'application/rss+xml,application/atom+xml,application/xml,text/xml'});
- with urlopen(req,timeout=TIMEOUT) as r:return r.read()
+    request = Request(url, headers={'User-Agent': 'SignalWire/3.0 (+public research dashboard)', 'Accept': 'application/rss+xml,application/atom+xml,application/xml,text/xml'})
+    with urlopen(request, timeout=TIMEOUT) as response:
+        return response.read()
+
+def fetch_one(spec):
+    try:
+        items = parse(fetch(spec['url']), spec, spec['url'])
+        return spec['name'], items, {'ok': True, 'count': len(items), 'url': spec['url'], 'tier': spec['tier'], 'access': spec['access']}, None
+    except Exception as exc:
+        return spec['name'], [], {'ok': False, 'count': 0, 'url': spec['url'], 'tier': spec['tier'], 'access': spec['access'], 'error': str(exc)[:180]}, f"{spec['name']}: {str(exc)[:140]}"
+
+def distinct_sources(group):
+    seen_urls = set(); rows = []
+    for source in group.get('sources', []):
+        key = canonical_url(source.get('url', ''))
+        if key and key in seen_urls:
+            continue
+        seen_urls.add(key); rows.append(source)
+    return rows
+
 def merge(items):
- groups=[]
- for x in items:
-  group=next((g for g in groups if similar(g['title'],x['title'])),None)
-  if not group:groups.append(x);continue
-  if x['domain'] not in {s['domain'] for s in group['sources']}:
-   group['sources'].append(x['sources'][0]);group['corroboration']=len({s.get('domain') for s in group['sources']})
-   group['source_tier']='official' if any(s.get('tier')=='official' for s in group['sources']) else max((s.get('tier','discovery') for s in group['sources']), key=lambda z:['discovery','specialist','major-financial','official'].index(z))
-   group['verification']='corroborated-report' if group['corroboration']>=2 else 'single-source'; group['score']=min(100,group['score']+8)
-   group['confidence']='high' if group['source_tier']=='official' and group['corroboration']>=2 else 'medium' if group['corroboration']>=2 or group['source_tier']=='official' else 'low'
-   group['reasons']=list(dict.fromkeys(group['reasons']+['independently corroborated']))[:8]
- # Build a small, evidence-based relationship graph. Connections are hypotheses, never facts.
- out=[]
- for x in groups:
-  text=(x['title']+' '+x.get('summary','')).lower(); links=[]
-  if any(k in text for k in ('rate','central bank','inflation','cpi','jobs','payroll')): links += ['rates → bonds','rates → currencies']
-  if any(k in text for k in ('oil','gas','opec','supply','shipping')): links += ['supply → inflation','energy → producers']
-  if any(k in text for k in ('tariff','sanction','trade','export')): links += ['trade → exporters','trade → currencies']
-  if any(k in text for k in ('bank','credit','default','yield')): links += ['credit → banks','yields → equities']
-  x['connections']=list(dict.fromkeys(links))[:4]
-  x['level']='High' if x['score']>=65 else 'Medium' if x['score']>=35 else 'Low'
-  x['verification_label']='Confirmed official data' if x.get('source_tier')=='official' and x.get('corroboration',1)>=2 else 'Corroborated reporting' if x.get('corroboration',1)>=2 else 'Reported lead — unverified'
-  if x['score']>=35:out.append(x)
- return sorted(out,key=lambda x:(x['score'],x['published']),reverse=True)[:250]
+    groups = []
+    # Official feeds are placed first so their titles/claims anchor a cluster.
+    ordered = sorted(items, key=lambda x: ({'official': 0, 'major-financial': 1, 'specialist': 2, 'discovery': 3}.get(x.get('source_tier'), 4), x.get('published', '')))
+    for current in ordered:
+        match = next((g for g in groups if similar(g.get('title', ''), current.get('title', ''))), None)
+        if not match:
+            groups.append(current)
+            continue
+        match['sources'] = distinct_sources(match)
+        existing_urls = {canonical_url(s.get('url', '')) for s in match['sources']}
+        for source in current.get('sources', []):
+            if canonical_url(source.get('url', '')) not in existing_urls:
+                match['sources'].append(source); existing_urls.add(canonical_url(source.get('url', '')))
+        match['sources'] = distinct_sources(match)
+        # Prefer the strongest evidence record for the event summary and URL.
+        if current.get('source_tier') == 'official' and match.get('source_tier') != 'official':
+            for key in ('title', 'summary', 'excerpt', 'url', 'source', 'domain', 'published', 'timestamp_type'):
+                match[key] = current.get(key, match.get(key))
+            match['score_breakdown'] = current.get('score_breakdown', match.get('score_breakdown', {}))
+        match['source_tier'] = max((s.get('tier', 'discovery') for s in match['sources']), key=lambda z: ['discovery', 'specialist', 'major-financial', 'official'].index(z))
+        match['corroboration'] = len({s.get('domain') for s in match['sources'] if s.get('domain') not in ('', 'unknown')})
+        match['score'] = min(100, int(match.get('score', 0)) + min(16, 5 * max(0, match['corroboration'] - 1)))
+        match['reasons'] = list(dict.fromkeys(match.get('reasons', []) + ['cross-source support']))[:8]
+
+    out = []
+    for event in groups:
+        sources = distinct_sources(event)
+        official = [s for s in sources if s.get('tier') == 'official']
+        domains = {s.get('domain') for s in sources if s.get('domain') not in ('', 'unknown')}
+        event['sources'] = sources
+        event['corroboration'] = len(domains)
+        event['source_count'] = len(sources)
+        event['verification'] = 'confirmed' if official else 'verified' if len(domains) >= 2 else 'single-source'
+        event['event_status'] = 'confirmed' if official else 'corroborated' if len(domains) >= 2 else 'developing' if event.get('source_tier') in ('major-financial', 'specialist') else 'unverified'
+        event['verification_label'] = 'Confirmed official data' if official else 'Corroborated across 2+ domains' if len(domains) >= 2 else 'Reported lead — verify carefully'
+        event['confidence'] = 'high' if official and len(domains) >= 2 else 'medium' if official or len(domains) >= 2 else 'low'
+        text = (event.get('title', '') + ' ' + event.get('summary', '')).lower()
+        links = []
+        if any(k in text for k in ('rate', 'central bank', 'inflation', 'cpi', 'jobs', 'payroll', 'yield')): links += ['policy/growth → bonds', 'policy expectations → currencies']
+        if any(k in text for k in ('oil', 'gas', 'opec', 'supply', 'shipping', 'energy')): links += ['supply → inflation expectations', 'energy → producers and transport']
+        if any(k in text for k in ('tariff', 'sanction', 'trade', 'export', 'import')): links += ['trade → exporters and currencies', 'trade → supply chains']
+        if any(k in text for k in ('bank', 'credit', 'default', 'loan')): links += ['credit conditions → banks', 'credit conditions → cyclical equities']
+        if any(k in text for k in ('chip', 'semiconductor', 'technology')): links += ['component supply → technology and manufacturing']
+        event['connections'] = list(dict.fromkeys(links))[:4]
+        event['level'] = 'High' if event.get('score', 0) >= 65 else 'Medium' if event.get('score', 0) >= RELEVANCE_THRESHOLD else 'Low'
+        event['freshness'] = freshness(event.get('published'))
+        event['confirmed_facts'] = event.get('summary', '')
+        event['speculation'] = 'The market paths listed are plausible analysis, not proof that one event caused a price move.'
+        if event.get('score', 0) >= RELEVANCE_THRESHOLD:
+            out.append(event)
+    return sorted(out, key=lambda x: (x.get('score', 0), x.get('published', '')), reverse=True)[:250]
+
+def freshness(value):
+    try:
+        age = (datetime.now(timezone.utc) - datetime.fromisoformat(str(value).replace('Z', '+00:00'))).total_seconds()
+        if age < 6 * 3600: return 'New / developing'
+        if age < 48 * 3600: return 'Recent'
+        return 'Older context'
+    except Exception:
+        return 'Timestamp uncertain'
+
 def fetch_all():
- sources=SOURCES+[(n,c,'https://api.gdeltproject.org/api/v2/doc/doc?query='+quote_plus(q)+'&mode=artlist&maxrecords=30&format=rss&sort=datedesc') for n,c,q in GDELT]; items=[];health={};errors=[]
- for n,c,u in sources:
-  try: got=parse(fetch(u),n,c,u);items+=got;health[n]={'ok':True,'count':len(got),'url':u}
-  except Exception as e:health[n]={'ok':False,'count':0,'url':u,'error':str(e)[:160]};errors.append(n+': '+str(e)[:120])
- return merge(items),health,errors
+    sources = list(SOURCES) + [feed(n, c, 'https://api.gdeltproject.org/api/v2/doc/doc?query=' + quote_plus(q) + '&mode=artlist&maxrecords=30&format=rss&sort=datedesc', 'discovery') for n, c, q in GDELT]
+    items, health, errors = [], {}, []
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        futures = [pool.submit(fetch_one, spec) for spec in sources]
+        for future in as_completed(futures):
+            name, got, status, error = future.result()
+            items.extend(got); health[name] = status
+            if error: errors.append(error)
+    return merge(items), health, sorted(errors)
+
 def build_knowledge(items, previous=None):
- previous=previous or {}
- if isinstance(previous,list): learned={hashlib.sha1((str(r.get('category',''))+'|'+str(r.get('topic',''))).encode()).hexdigest()[:14]:r for r in previous if isinstance(r,dict)}
- elif isinstance(previous,dict): learned=dict(previous)
- else: learned={}
- for x in items:
-  if x.get('score',0)<45 or (x.get('source_tier')!='official' and x.get('corroboration',1)<2): continue
-  key=hashlib.sha1((x.get('category','')+'|'+re.sub(r'[^a-z0-9 ]','',x.get('title','').lower())[:140]).encode()).hexdigest()[:14]
-  rec=learned.get(key, {'first_seen':x.get('published'), 'observations':0})
-  rec.update({'topic':x.get('title'), 'category':x.get('category'), 'last_seen':x.get('published'), 'confidence':x.get('confidence','medium'), 'verification':x.get('verification_label'), 'source_tier':x.get('source_tier'), 'market_links':x.get('connections',[]), 'score':x.get('score',0), 'evidence_urls':[s.get('url') for s in x.get('sources',[])[:4]]})
-  rec['observations']=int(rec.get('observations',0))+1
-  learned[key]=rec
- return {'version':1,'updated':now(),'entries':list(learned.values())[-500:]}
+    if isinstance(previous, dict): previous = previous.get('entries', [])
+    learned = {}
+    for row in previous or []:
+        if isinstance(row, dict): learned[row.get('key') or hashlib.sha1(str(row).encode()).hexdigest()[:14]] = row
+    for event in items:
+        if event.get('score', 0) < 45 or event.get('verification') not in ('confirmed', 'verified'):
+            continue
+        key = hashlib.sha1((event.get('category', '') + '|' + event_key(event.get('title', ''))).encode()).hexdigest()[:14]
+        record = learned.get(key, {'key': key, 'first_seen': event.get('published'), 'observations': 0})
+        record.update({'topic': event.get('title'), 'category': event.get('category'), 'last_seen': event.get('published'), 'confidence': event.get('confidence'), 'verification': event.get('verification_label'), 'source_tier': event.get('source_tier'), 'market_links': event.get('connections', []), 'evidence_urls': [s.get('url') for s in event.get('sources', [])[:4]], 'status': 'current'})
+        record['observations'] = int(record.get('observations', 0)) + 1
+        learned[key] = record
+    return {'version': 2, 'updated': now(), 'entries': list(learned.values())[-500:]}
 
 def save(payload):
- os.makedirs(DATA,exist_ok=True);tmp=CACHE+'.tmp'
- with open(tmp,'w',encoding='utf8') as f:json.dump(payload,f,ensure_ascii=False)
- os.replace(tmp,CACHE)
- try:
-  prior=json.load(open(KNOWLEDGE,encoding='utf8')).get('entries',{})
- except Exception: prior={}
- ktmp=KNOWLEDGE+'.tmp'
- with open(ktmp,'w',encoding='utf8') as f: json.dump(build_knowledge(payload.get('items',[]), prior),f,ensure_ascii=False)
- os.replace(ktmp,KNOWLEDGE)
+    os.makedirs(DATA, exist_ok=True)
+    tmp = CACHE + '.tmp'
+    with open(tmp, 'w', encoding='utf8') as handle: json.dump(payload, handle, ensure_ascii=False)
+    os.replace(tmp, CACHE)
+    try:
+        with open(KNOWLEDGE, encoding='utf8') as handle: previous = json.load(handle)
+    except Exception:
+        previous = {}
+    ktmp = KNOWLEDGE + '.tmp'
+    with open(ktmp, 'w', encoding='utf8') as handle: json.dump(build_knowledge(payload.get('items', []), previous), handle, ensure_ascii=False)
+    os.replace(ktmp, KNOWLEDGE)
+
 def refresh(force=False):
- with lock:
-  if state['refreshing']:return False
-  state['refreshing']=True
- try:
-  items,health,errors=fetch_all();payload={'items':items,'last_refresh':now(),'source_health':health,'errors':errors};save(payload)
-  try: payload['knowledge']=json.load(open(KNOWLEDGE,encoding='utf8'))
-  except Exception: payload['knowledge']={'version':1,'entries':[]}
-  with lock:state.update(payload)
- finally:
-  with lock:state['refreshing']=False
- return True
+    with lock:
+        if state['refreshing']: return False
+        state['refreshing'] = True
+    try:
+        items, health, errors = fetch_all()
+        payload = {'items': items, 'last_refresh': now(), 'source_health': health, 'errors': errors}
+        save(payload)
+        try:
+            with open(KNOWLEDGE, encoding='utf8') as handle: payload['knowledge'] = json.load(handle)
+        except Exception:
+            payload['knowledge'] = {'version': 2, 'entries': []}
+        with lock: state.update(payload)
+    finally:
+        with lock: state['refreshing'] = False
+    return True
+
 def init():
- try:
-  with open(CACHE,encoding='utf8') as f:state.update(json.load(f))
- except Exception:pass
- if not state['items']:threading.Thread(target=refresh,daemon=True).start()
+    try:
+        with open(CACHE, encoding='utf8') as handle: state.update(json.load(handle))
+    except Exception:
+        pass
+    if not state['items']:
+        threading.Thread(target=refresh, daemon=True).start()
+
 if HAS_FLASK:
- app=Flask(__name__)
- @app.get('/')
- def index():return render_template('index.html')
- @app.get('/api/items')
- def api():return jsonify(state)
- @app.post('/api/refresh')
- def api_refresh():threading.Thread(target=refresh,args=(True,),daemon=True).start();return jsonify({'accepted':True})
- @app.get('/api/knowledge')
- def knowledge():
-  try:return jsonify(json.load(open(KNOWLEDGE,encoding='utf8')))
-  except Exception:return jsonify({'version':1,'entries':[]})
- @app.get('/health')
- def health():return jsonify({'ok':True,'items':len(state['items']),'last_refresh':state['last_refresh']})
-if __name__=='__main__':init();app.run(host='0.0.0.0',port=PORT,debug=False)
+    app = Flask(__name__)
+    @app.get('/')
+    def index(): return render_template('index.html')
+    @app.get('/api/items')
+    def api(): return jsonify(state)
+    @app.post('/api/refresh')
+    def api_refresh(): threading.Thread(target=refresh, args=(True,), daemon=True).start(); return jsonify({'accepted': True})
+    @app.get('/api/knowledge')
+    def knowledge():
+        try:
+            with open(KNOWLEDGE, encoding='utf8') as handle: return jsonify(json.load(handle))
+        except Exception: return jsonify({'version': 2, 'entries': []})
+    @app.get('/health')
+    def health(): return jsonify({'ok': True, 'items': len(state['items']), 'last_refresh': state['last_refresh']})
+
+if __name__ == '__main__':
+    init(); app.run(host='0.0.0.0', port=PORT, debug=False)
