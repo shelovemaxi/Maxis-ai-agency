@@ -7,7 +7,7 @@ DOCS=os.path.join(ROOT,"docs")
 sys.path.insert(0,ROOT)
 import app
 items, health, errors = app.fetch_all()
-payload={"items":items,"last_refresh":datetime.now(timezone.utc).isoformat(),"source_health":health,"errors":errors}
+payload={"items":items,"last_refresh":datetime.now(timezone.utc).isoformat(),"source_health":health,"errors":errors,"source_registry":app.REGISTRY,"registry_summary":{"total":len(app.REGISTRY),"categories":{c:sum(1 for r in app.REGISTRY if r['category']==c) for c in sorted({r['category'] for r in app.REGISTRY})},"monitored":sum(1 for r in app.REGISTRY if r.get('monitorable'))}}
 try:
     with open(os.path.join(DOCS,"data.json"),encoding="utf8") as f: previous_knowledge=json.load(f).get('knowledge',{}).get('entries',{})
 except Exception: previous_knowledge={}

@@ -8,6 +8,7 @@ from urllib.parse import quote_plus
 from urllib.request import Request,urlopen
 import xml.etree.ElementTree as ET
 from analysis import analyse, similar
+from source_registry import REGISTRY, source_meta
 try:
  from flask import Flask,jsonify,render_template
  HAS_FLASK=True
@@ -40,7 +41,7 @@ def tier_for(source, url):
 def item(title,summary,url,published,source,category):
  a=analyse(title,summary,category)
  t=tier_for(source,url); ts=date(published)
- return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'excerpt':clean(summary)[:480],'url':url,'source':source,'domain':domain(url),'category':category,'published':ts,'timestamp_type':'published','source_tier':t,'score':a['score'],'score_breakdown':a.get('score_breakdown',{}),'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'confidence':a.get('confidence','medium'),'why_it_matters':a.get('why_it_matters',a['market_relevance']),'sources':[{'name':source,'domain':domain(url),'url':url,'title':title,'published':ts,'timestamp_type':'published','tier':t,'excerpt':clean(summary)[:480]}],'verification':'single-source','corroboration':1,'connections':[]}
+ return {'id':hashlib.sha1((title+url).encode()).hexdigest()[:16],'title':title,'summary':a['summary'],'excerpt':clean(summary)[:480],'url':url,'source':source,'domain':domain(url),'category':category,'published':ts,'timestamp_type':'published','source_tier':t,'score':a['score'],'score_breakdown':a.get('score_breakdown',{}),'reasons':a['reasons'],'market_relevance':a['market_relevance'],'analysis_provider':a['analysis_provider'],'affected_assets':a.get('affected_assets',[]),'confidence':a.get('confidence','medium'),'why_it_matters':a.get('why_it_matters',a['market_relevance']),'sources':[{'name':source,'domain':domain(url),'url':url,'title':title,'published':ts,'timestamp_type':'published','tier':t,'excerpt':clean(summary)[:480],**{k:source_meta(source,url).get(k) for k in ('rating','stars','rationale')}}],'verification':'single-source','corroboration':1,'connections':[]}
 def parse(raw,source,category,fallback):
  root=ET.fromstring(raw); out=[]
  for n in [e for e in root.iter() if e.tag.split('}')[-1].lower() in ('item','entry')][:60]:
@@ -124,7 +125,7 @@ def refresh(force=False):
   if state['refreshing']:return False
   state['refreshing']=True
  try:
-  items,health,errors=fetch_all();payload={'items':items,'last_refresh':now(),'source_health':health,'errors':errors};save(payload)
+  items,health,errors=fetch_all();payload={'items':items,'last_refresh':now(),'source_health':health,'errors':errors,'source_registry':REGISTRY,'registry_summary':{'total':len(REGISTRY),'categories':{c:sum(1 for r in REGISTRY if r['category']==c) for c in sorted({r['category'] for r in REGISTRY})},'monitored':sum(1 for r in REGISTRY if r.get('monitorable'))}};save(payload)
   try: payload['knowledge']=json.load(open(KNOWLEDGE,encoding='utf8'))
   except Exception: payload['knowledge']={'version':1,'entries':[]}
   with lock:state.update(payload)
@@ -144,6 +145,8 @@ if HAS_FLASK:
  def api():return jsonify(state)
  @app.post('/api/refresh')
  def api_refresh():threading.Thread(target=refresh,args=(True,),daemon=True).start();return jsonify({'accepted':True})
+ @app.get('/api/sources')
+ def sources():return jsonify({'sources':REGISTRY,'summary':{'total':len(REGISTRY),'categories':{c:sum(1 for r in REGISTRY if r['category']==c) for c in sorted({r['category'] for r in REGISTRY})}}})
  @app.get('/api/knowledge')
  def knowledge():
   try:return jsonify(json.load(open(KNOWLEDGE,encoding='utf8')))
