@@ -8,7 +8,7 @@ const fmtTime=v=>{const d=new Date(v);if(!Number.isFinite(d.getTime()))return'Un
 const ago=v=>{const d=new Date(v),ms=Date.now()-d.getTime();if(!Number.isFinite(ms)||ms<0)return'just now';const m=Math.floor(ms/60000);return m<1?'just now':m<60?`${m}m ago`:m<1440?`${Math.floor(m/60)}h ago`:fmtTime(v)};
 const DEFAULT_THRESHOLD=50;
 const state={all:[],knowledge:{entries:[]},source:'all',loaded:false};
-const threshold=$('#threshold'),category=$('#category'),verification=$('#verification'),source=$('#source'),detail=$('#detail');
+const threshold=$('#threshold'),view=$('#view'),category=$('#category'),verification=$('#verification'),source=$('#source'),detail=$('#detail');
 const unique=a=>[...new Set((a||[]).filter(Boolean))];
 const sourceRows=x=>Array.isArray(x?.sources)&&x.sources.length?x.sources:[{name:x?.source||'Unknown source',domain:x?.domain||'unknown',url:x?.url||'',published:x?.published,tier:x?.source_tier||'discovery',excerpt:x?.excerpt||''}];
 const domainCount=x=>unique(sourceRows(x).map(s=>String(s.domain||'').replace(/^www\./,'').toLowerCase()).filter(d=>d&&d!=='unknown')).length;
@@ -17,7 +17,7 @@ const independentlyChecked=x=>evidenceCode(x)!=='single-source'&&domainCount(x)>
 const tierName=x=>({official:'Official', 'major-financial':'Major financial', specialist:'Specialist', discovery:'Discovery'}[x?.source_tier]||'Discovery');
 const confidenceName=x=>({high:'High confidence',medium:'Medium confidence',low:'Low confidence'}[x?.confidence]||'Unstated confidence');
 const statusName=x=>x?.verification_label||(evidenceCode(x)==='confirmed'?'Confirmed official data':independentlyChecked(x)?'Corroborated across 2+ domains':'Reported lead — verify carefully');
-const filtered=()=>state.all.filter(x=>Number(x?.score||0)>=Number(threshold?.value||DEFAULT_THRESHOLD)&&(category?.value==='all'||x.category===category.value)&&(verification?.value==='all'||evidenceCode(x)===verification.value)&&(source?.value==='all'||sourceRows(x).some(s=>s.name===source.value)));
+const filtered=()=>{const age=view?.value==='24h'?86400000:view?.value==='7d'?604800000:Infinity;const cutoff=Date.now()-age;return state.all.filter(x=>Number(x?.score||0)>=Number(threshold?.value||DEFAULT_THRESHOLD)&&(age===Infinity||new Date(x.published).getTime()>=cutoff)&&(category?.value==='Health & biotech'?Number(x?.score||0)>=20:(category?.value==='all'||x.category===category.value))&&(verification?.value==='all'||evidenceCode(x)===verification.value)&&(source?.value==='all'||sourceRows(x).some(s=>s.name===source.value)));}
 function sourceOptions(){
   if(!source)return;
   const current=state.source||source.value||'all';
@@ -94,7 +94,7 @@ async function askAI(body){
 function setup(){
   try{const p=JSON.parse(localStorage.getItem('sw-filter-v2')||'null');if(p){if(threshold)threshold.value=p.t||DEFAULT_THRESHOLD;if(category)category.value=p.c||'all';if(verification)verification.value=p.v||'all';state.source=p.s||'all';}}catch{}
   if(threshold){setText('#thresholdValue',threshold.value);threshold.addEventListener('input',()=>{setText('#thresholdValue',threshold.value);render();});}
-  [category,verification,source].forEach(e=>e?.addEventListener('change',()=>{if(e===source)state.source=source.value;render();}));
+  [view,category,verification,source].forEach(e=>e?.addEventListener('change',()=>{if(e===source)state.source=source.value;render();}));
   $('#cards')?.addEventListener('click',e=>{const c=e.target.closest('.card');if(c)openDetail(c.dataset.id);});
   $('#cards')?.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.closest('.card')){e.preventDefault();openDetail(e.target.closest('.card').dataset.id);}});
   $('#closeDetail')?.addEventListener('click',()=>detail?.close?.());detail?.addEventListener('click',e=>{if(e.target===detail)detail.close?.();});
