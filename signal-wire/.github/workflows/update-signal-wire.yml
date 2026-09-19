@@ -1,17 +1,13 @@
-name: Refresh Signal Wire data
-
+name: Refresh Signal Wire intelligence
 on:
   workflow_dispatch:
   schedule:
     - cron: "*/15 * * * *"
-
 permissions:
   contents: write
-
 concurrency:
   group: signal-wire-refresh
   cancel-in-progress: true
-
 jobs:
   refresh:
     runs-on: ubuntu-latest
@@ -19,19 +15,22 @@ jobs:
       run:
         working-directory: signal-wire
     steps:
-      - name: Check out repository
-        uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
-      - name: Refresh public snapshot
+      - name: Sync generated frontend copies
+        run: python scripts/sync_frontend.py
+      - name: Collect, verify, score, and publish snapshot
+        env:
+          # Optional. Add GEMINI_API_KEY in GitHub repository Actions secrets to enable AI enrichment.
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: python scripts/update_signal_wire.py
-      - name: Commit refreshed data
+      - name: Commit refreshed intelligence snapshot
         working-directory: .
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add signal-wire/docs/data.json
-          git diff --cached --quiet || git commit -m "chore: refresh Signal Wire data"
+          git add signal-wire/docs/app.js signal-wire/docs/style.css signal-wire/docs/index.html signal-wire/static/app.js signal-wire/static/style.css signal-wire/templates/index.html signal-wire/docs/data.json
+          git diff --cached --quiet || git commit -m "chore: refresh Signal Wire intelligence"
           git push

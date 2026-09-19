@@ -1,12 +1,6 @@
 # Signal Wire
 
-Signal Wire is a local, no-signup market intelligence dashboard for macro, equities, crypto, commodities, geopolitics, and natural events. It uses free public RSS/Atom feeds plus official primary-data endpoints. It does **not** scrape Twitter/X and does not require paid World Monitor APIs.
-
-## Source coverage
-
-The collector includes Federal Reserve, ECB, BLS, BEA, SEC, CNBC, Yahoo Finance, CoinDesk, Cointelegraph, OilPrice, and USGS feeds, plus IMF DataMapper, Bank of Japan, Bank of Canada, Reserve Bank of Australia, Bank of England, and CFTC feeds. It also monitors public publisher-indexed RSS results for Reuters, Bloomberg, Financial Times, Wall Street Journal, MarketWatch, Investing.com, AP Business, BBC Business, and Trading Economics where those publishers do not expose a stable open RSS endpoint.
-
-Publisher-indexed headlines are leads, not proof. Signal Wire deduplicates similar events, keeps original links, and requires independent domains for corroboration. Primary-data snapshots are labeled as confirmed data and do not independently verify a news claim. Paywalled publisher content is not bypassed.
+Signal Wire is a local, no-signup market intelligence dashboard for macro, equities, crypto, commodities, geopolitics, and natural events. It uses free public RSS/Atom feeds plus GDELT DOC and USGS earthquake data. It does **not** scrape Twitter/X and does not use paid World Monitor APIs.
 
 ## Quick start
 
@@ -23,11 +17,25 @@ pip install -r requirements.txt
 ```powershell
 cd signal-wire
 py -m venv .venv
-.\\.venv\\Scripts\\Activate.ps1
-.\\run.bat
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+.\run.bat
 ```
 
 Open http://127.0.0.1:5050. Flask is optional: without it, the app starts a standard-library server with API access and a minimal landing page.
+
+## Frontend source of truth
+
+Edit the root `index.html`, `app.js`, and `style.css` only. The GitHub Pages and
+Flask folders contain generated copies for their respective hosts. Keep them
+synchronized with:
+
+```bash
+python scripts/sync_frontend.py
+```
+
+CI runs this sync before publishing. To detect accidental drift without changing
+files, use `python scripts/sync_frontend.py --check`.
 
 ## GitHub Pages deployment
 
@@ -50,8 +58,7 @@ The project URL will normally be `https://USERNAME.github.io/REPOSITORY/signal-w
 - `/health` liveness JSON
 
 ## How it works
-
-Feeds and queries are configured near the top of `app.py`. Requests use a timeout and descriptive User-Agent. XML and JSON are parsed with the Python standard library. Each item receives transparent phrase-based weights for rate decisions, inflation, jobs, recession, sanctions, tariffs, conflict, OPEC, energy, disruptions, failures, hacks, ETFs, liquidations, and other signals; noise phrases reduce scores. Percentage moves contribute a capped boost. Scores are 0–100. Normalized duplicate titles are collapsed and items reported by multiple distinct domains get a corroboration boost. The UI shows matched reasons, source, timestamp, and original link.
+Feeds and queries are configured near the top of `app.py`. Requests use a timeout and descriptive User-Agent. XML is parsed with the Python standard library. Each item receives transparent phrase-based weights for rate decisions, inflation, jobs, recession, sanctions, tariffs, conflict, OPEC, energy, disruptions, failures, hacks, ETFs, liquidations, and other signals; noise phrases reduce scores. Percentage moves contribute a capped boost. Scores are 0–100: High (60+), Medium (30–59), Low (<30). Normalized duplicate titles are collapsed and items reported by multiple distinct domains get a small corroboration boost. The UI shows matched reasons, source, timestamp, and original link.
 
 The cache is written atomically to `data/cache.json`; if a refresh fails, the last successful data remains available. Automatic refresh is limited to every 15 minutes, while the dashboard polls status periodically. Threshold and filter preferences are stored only in browser localStorage.
 
@@ -67,11 +74,9 @@ The dashboard includes an AI analyst panel. GitHub Pages cannot keep a Gemini ke
 The browser sends the current filtered events with each question. The Worker instructs Gemini to use only that evidence, disclose uncertainty, respect the two-domain verification rule, and avoid personalized financial advice. The key never reaches GitHub Pages or the browser.
 
 ## Limitations, privacy, and safety
-
-Feeds can be delayed, blocked, malformed, rate-limited, or unavailable. Some publishers change RSS URLs or restrict access. Google News publisher-indexed RSS is used only where a stable publisher feed is unavailable; it is not treated as a primary source. Scores are rule-based prioritization, not predictions, fact verification, or investment advice. Always open the original source and independently verify important information. Do not make trading decisions solely from this dashboard.
+Feeds can be delayed, blocked, malformed, rate-limited, or unavailable. Some publishers change RSS URLs or restrict access. GDELT results are broad and may include noisy reporting. Scores are rule-based prioritization, not predictions, fact verification, or investment advice. Always open the original source and independently verify important information. No credentials or user data are collected; this is intended for local use. Do not make trading decisions solely from this dashboard.
 
 ## Troubleshooting
-
 - Check `/api/status` for per-source errors.
 - If port 5050 is busy, run `PORT=5051 python3 app.py` (PowerShell: `$env:PORT=5051; py app.py`).
 - A firewall, proxy, DNS issue, or publisher rate limit can cause feed failures; cached data will still display after the first successful refresh.
